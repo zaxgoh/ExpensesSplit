@@ -74,14 +74,21 @@ npm run typecheck && npm test && npm run build
 npm run deploy:rules   # firebase deploy --only firestore  (rules + indexes)
 ```
 
-Then App Hosting. It builds from a **connected GitHub repository**, so there is no
-`firebase deploy --only apphosting`: a push to the live branch is the deploy, and rollback is
-one click in the console. Steps, in order:
+Then App Hosting. Because the backend is connected to a **GitHub repository**, a push to the live
+branch is the deploy, and rollback is one click in the console. There *is* also a CLI source-deploy
+path (`firebase deploy --only apphosting:<backendId>`), but it needs an `apphosting` block in
+`firebase.json` that `firebase init apphosting` writes; configuring from the console skips that, so
+the GitHub path is the one in use here.
+
+Steps, in order:
 
 1. Grant the Firebase App Hosting GitHub app access to this repository.
 2. Create a backend against it (`firebase apphosting:backends:create`), picking the live branch.
-3. Put the backend id in `apphosting.yaml` and in `.env.local` — it is referenced by
-   `NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID`.
+3. Set the backend id as `NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID`, either in `apphosting.yaml` or
+   in App Hosting → Settings → Environment — console values override the file. Same for
+   `NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY` once App Check exists. Both are absent from
+   `apphosting.yaml` today because their values are not known yet; the app treats absent and empty
+   the same.
 4. Register the backend's `*.hosted.app` domain (and any custom domain) in **App Check** →
    allowed domains, *then* enforce App Check on Firestore and Auth. Note that App Hosting serves
    from `hosted.app`, not `web.app`; enforcing before the domain is registered locks the app out of
@@ -90,6 +97,21 @@ one click in the console. Steps, in order:
 
 `apphosting.staging.yaml` and `apphosting.local.yaml` do not exist yet — the CLI generates the
 latter when a backend is created, and the former only matters once there is a staging backend.
+
+### `apphosting.yaml` gotcha
+
+`availability` must be a **block** sequence:
+
+```yaml
+    availability:
+      - BUILD
+      - RUNTIME
+```
+
+The flow form `availability: [BUILD, RUNTIME]` is perfectly valid YAML and parses fine locally —
+`firebase-tools` reads it without complaint — but App Hosting's config validator rejects the file
+with *"is not formatted properly"*. The error surfaces only at deploy time, and only says the file is
+malformed without naming the offending key, so it is worth knowing in advance.
 
 ## Data model
 

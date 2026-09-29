@@ -1,11 +1,17 @@
-# Firebase App Hosting configuration. Committed; contains no secrets.
+# Firebase App Hosting configuration. Committed; contains no secrets — the web
+# API key is not a secret. App Check and Auth are what actually protect the data.
 #
-# Note on availability: every NEXT_PUBLIC_* variable below must include BUILD,
-# because Next.js inlines them into the client bundle at build time. A
-# RUNTIME-only value is simply `undefined` in the browser, which is the most
-# common App Hosting + Next.js misconfiguration. RUNTIME is listed as well so
-# server-side code can read the same values.
+# Format note: `availability` must be a BLOCK sequence. The flow form
+# `availability: [BUILD, RUNTIME]` is valid YAML but is rejected by App Hosting's
+# config validator with "is not formatted properly". This is what
+# `firebase-tools` writes, so keep the shape.
+#
+# Why BUILD is mandatory: Next.js inlines NEXT_PUBLIC_* into the client bundle at
+# build time. A RUNTIME-only value is simply `undefined` in the browser, which is
+# the most common App Hosting + Next.js misconfiguration. RUNTIME is listed too
+# so server-side code can read the same values.
 
+# Settings for the Cloud Run service that serves the app.
 runConfig:
   cpu: 1
   memoryMiB: 512
@@ -16,44 +22,63 @@ runConfig:
 env:
   - variable: NEXT_PUBLIC_FIREBASE_API_KEY
     value: "AIzaSyAOPJoCpNhzfnTcNtECno2z7rg2K6cgtjA"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
     value: "expensessplit-cb870.firebaseapp.com"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: NEXT_PUBLIC_FIREBASE_PROJECT_ID
     value: "expensessplit-cb870"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
     value: "expensessplit-cb870.firebasestorage.app"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID
     value: "1064064784793"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
   - variable: NEXT_PUBLIC_FIREBASE_APP_ID
     value: "1:1064064784793:web:a8c9c829014c78cdd0db08"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
 
-  # Set to the backend id from `firebase apphosting:backends:list` once the
-  # App Hosting backend exists. The Firebase web API key is not a secret, so
-  # these values are safe to commit; App Check and Auth are what actually
-  # protect the data.
-
-  - variable: NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID
-    value: ""
-    availability: [BUILD, RUNTIME]
-
-  # reCAPTCHA Enterprise site key from App Check. Required once App Check is
-  # enforced; empty in the emulator, where tokens are bypassed.
-  - variable: NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY
-    value: ""
-    availability: [BUILD, RUNTIME]
-
-  # Never true in App Hosting: it would point production at localhost.
+  # Never true here: it would point production at localhost. The app uses the
+  # local emulator suite instead.
   - variable: NEXT_PUBLIC_USE_FIREBASE_EMULATORS
     value: "false"
-    availability: [BUILD, RUNTIME]
+    availability:
+      - BUILD
+      - RUNTIME
+
+# Two variables are deliberately absent because their values are not known yet.
+# Add them here once you have the values, in the same block form as above:
+#
+#   - variable: NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID
+#     value: "<backend-id>"
+#     availability:
+#       - BUILD
+#       - RUNTIME
+#
+#   - variable: NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY
+#     value: "<reCAPTCHA Enterprise site key>"
+#     availability:
+#       - BUILD
+#       - RUNTIME
+#
+# Both are read defensively in src/lib/firebase/client.ts, so an absent variable
+# behaves the same as an empty one. Console-set values override this file, so
+# the backend id can equally live in App Hosting → Settings → Environment.
