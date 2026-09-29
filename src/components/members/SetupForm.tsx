@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useHousehold } from "@/components/layout/HouseholdProvider";
 import { householdNameSchema, memberNameSchema } from "@/lib/validation/schemas";
-import { AVATARS } from "@/lib/repository/local";
+import { AVATARS } from "@/lib/members/avatars";
 
 /** F1: first run. No currency is asked for; the app always uses "$". */
 export function SetupForm() {
@@ -66,7 +66,8 @@ export function SetupForm() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Set up your household</h1>
         <p className="text-sm text-muted-foreground">
-          No account needed. Everything is stored on this device.
+          No account needed. This household is identified by an anonymous sign-in on this device, so
+          there is nothing to log in to later.
         </p>
       </div>
 

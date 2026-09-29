@@ -8,19 +8,22 @@ import type {
   CreateExpenseInput,
   CreatePeriodInput,
   Repository,
+  Unsubscribe,
+  WatchErrorHandler,
 } from "@/lib/repository/types";
-import type { Expense, ExpensePeriod, Household, Member } from "@/types";
+import type { Category, Expense, ExpensePeriod, Household, Member } from "@/types";
+import { DEFAULT_CATEGORIES } from "@/lib/firebase/paths";
+import { AVATARS } from "@/lib/members/avatars";
 
 const KEYS = {
   household: "1stsplit:household",
   members: "1stsplit:members",
   periods: "1stsplit:periods",
   expenses: "1stsplit:expenses",
+  categories: "1stsplit:categories",
   theme: "1stsplit:theme",
   lastPeriodId: "1stsplit:lastPeriodId",
 } as const;
-
-export const AVATARS = ["🦊", "🐼", "🐙", "🦉", "🐢", "🦁", "🐸", "🐧", "🦄", "🐝"];
 
 const PALETTE = [
   "#F87171",
@@ -114,14 +117,23 @@ export const localRepository: Repository = {
 
   async createHousehold(name) {
     const now = Date.now();
+    const id = uid();
     const household: Household = {
-      id: uid(),
+      id,
       name: name.trim(),
+      // Stands in for the anonymous Firebase uid, which is what this id is in
+      // the Firestore build. Always exactly one entry in v1.
+      memberUids: [id],
+      // Append-only, exactly as Firestore's rules require: a member document
+      // may only exist once its id is registered here.
+      memberIds: [],
+      settings: { defaultCategoryId: "other" },
       schemaVersion: 1,
       createdAt: now,
       updatedAt: now,
     };
     write(KEYS.household, household);
+    write(KEYS.categories, DEFAULT_CATEGORIES.map((c) => ({ ...c })));
     return household;
   },
 
@@ -132,8 +144,9 @@ export const localRepository: Repository = {
   async createMember(name, avatar) {
     const members = read<Member[]>(KEYS.members, []);
     const now = Date.now();
+    const id = uid();
     const member: Member = {
-      id: uid(),
+      id,
       name: name.trim(),
       avatar: avatar && avatar.length > 0 ? avatar : AVATARS[members.length % AVATARS.length],
       colorHex: "",
@@ -144,6 +157,13 @@ export const localRepository: Repository = {
     member.colorHex = colorFor(member.id);
     members.push(member);
     write(KEYS.members, members);
+
+    const household = read<Household | null>(KEYS.household, null);
+    if (household) {
+      // Never pruned: an archived member's id has to stay resolvable so the
+      // historical expenses that reference them remain valid.
+      write(KEYS.household, { ...household, memberIds: [...household.memberIds, id] });
+    }
     return member;
   },
 
@@ -191,6 +211,10 @@ export const localRepository: Repository = {
   },
 
   async deletePeriod(id) {
+    // Mirrors the Firestore rule that deletes lock: a settled period must be
+    // reopened first. The local repository is the only backstop in Phase 1, so
+    // it has to agree with what the rules will later enforce.
+    assertOpen(allPeriods().find((p) => p.id === id), "delete a period");
     saveExpenses(allExpenses().filter((e) => e.periodId !== id));
     savePeriods(allPeriods().filter((p) => p.id !== id));
   },
@@ -253,6 +277,50 @@ export const localRepository: Repository = {
     saveExpenses(allExpenses().filter((e) => e.id !== id));
     touchPeriod(periodId);
   },
+
+  // ---------------------------------------------------------------- realtime
+  //
+  // localStorage has no listener, so each of these emits the current contents
+  // once and returns a no-op unsubscribe. Callers that mutate data re-read it
+  // explicitly (HouseholdProvider's reload helpers), which is what keeps the
+  // UI immediate here; the Firestore repository is the one that pushes.
+
+  subscribeHousehold(onNext, onError) {
+    return emit(() => void localRepository.getHousehold().then(onNext).catch(report(onError)));
+  },
+
+  subscribeMembers(onNext, onError) {
+    return emit(() => void localRepository.listMembers().then(onNext).catch(report(onError)));
+  },
+
+  subscribePeriods(onNext, onError) {
+    return emit(() => void localRepository.listPeriods().then(onNext).catch(report(onError)));
+  },
+
+  subscribeCategories(onNext, onError) {
+    return emit(() =>
+      void Promise.resolve()
+        .then(() => read<Category[]>(KEYS.categories, DEFAULT_CATEGORIES.map((c) => ({ ...c }))))
+        .then(onNext)
+        .catch(report(onError)),
+    );
+  },
+
+  subscribeExpenses(periodId, onNext, onError) {
+    return emit(() =>
+      void localRepository.listExpenses(periodId).then(onNext).catch(report(onError)),
+    );
+  },
 };
 
-export { KEYS as STORAGE_KEYS };
+/** Runs `attach` and hands back the no-op unsubscribe the interface promises. */
+function emit(attach: () => void): Unsubscribe {
+  attach();
+  return () => {};
+}
+
+function report(onError?: WatchErrorHandler): (error: unknown) => void {
+  return (error) => {
+    if (onError) onError(error instanceof Error ? error : new Error(String(error)));
+  };
+}

@@ -1,0 +1,262 @@
+rules_version = '2';
+
+/**
+ * ExpensesSplit security rules.
+ *
+ * The app has no login. Each browser signs in anonymously and the resulting uid
+ * becomes the household document id, so `memberUids` is the single thing every
+ * rule is authorised on. Deny by default: every path below states its own
+ * condition, and there is no `if true` anywhere.
+ *
+ * Two things Firestore rules genuinely cannot do, deliberately not attempted:
+ *
+ *  - A rule cannot see the other writes in a batch, so "a period's
+ *    totalAmountMinor / expenseCount may only change alongside an expense
+ *    mutation" is NOT enforced here. It is enforced in the repository, which
+ *    always recomputes and writes both in the same batch, and is covered by the
+ *    repository tests.
+ *
+ *  - There is no loop in the rules language, so "every id in participants is an
+ *    existing member document" cannot be checked one document at a time. It is
+ *    checked against the household's append-only `memberIds` array instead,
+ *    which the repository keeps in step with the members collection.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------------------------------------------------------- helpers
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hh(hid) {
+      return get(/databases/$(database)/documents/households/$(hid));
+    }
+
+    /** Reads and most writes are authorised on the household's memberUids. */
+    function isMember(hid) {
+      return isSignedIn() && isSignedIn() in hh(hid).data.memberUids;
+    }
+
+    function isIsoDate(value) {
+      return value is string && value.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isSplitMode(value) {
+      return value in ['equal', 'exact', 'percent'];
+    }
+
+    /** sharesMinor's keys are exactly `participants`, and they sum to the total. */
+    function sharesAreSound(shares, amountMinor, participants) {
+      return shares is map
+        && shares.keys().hasAll(participants)
+        && participants.hasOnly(shares.keys())
+        && shares.values().sum() == amountMinor;
+    }
+
+    // ------------------------------------------------------------- household
+
+    match /households/{hid} {
+      /**
+       * First run. The anonymous uid signs itself in as the sole member. Note
+       * this cannot go through `isMember`: the document does not exist yet, so
+       * the `get()` inside it would fail and deny the one write that has to be
+       * allowed.
+       */
+      allow create: if isSignedIn()
+        && request.resource.data.memberUids.size() == 1
+        && request.resource.data.memberUids[0] == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.settings is map
+        && request.resource.data.settings.defaultCategoryId is string
+        && request.resource.data.memberIds is list
+        && request.resource.data.memberIds.size() == 0
+        && request.resource.data.createdAt == request.time;
+
+      allow read: if isMember(hid);
+
+      /**
+       * `memberUids` is immutable — it is the access control list, and letting
+       * it change would mean the create rule above is the only thing standing
+       * between a household and the public. `memberIds` may only grow, one at a
+       * time, in the same batch as the member document it registers.
+       */
+      allow update: if isMember(hid)
+        && request.resource.data.memberUids == resource.data.memberUids
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 60
+        && request.resource.data.settings == resource.data.settings
+        && request.resource.data.memberIds is list
+        && resource.data.memberIds is list
+        && request.resource.data.memberIds.size() <= resource.data.memberIds.size() + 1
+        && resource.data.memberIds.filter(
+             x, !request.resource.data.memberIds.hasAny([x])
+           ).size() == 0;
+
+      allow delete: if isMember(hid);
+
+      // -------------------------------------------------------------- members
+
+      match /members/{id} {
+        function validMember() {
+          return request.resource.data.name is string
+            && request.resource.data.name.size() >= 1
+            && request.resource.data.name.size() <= 40
+            && request.resource.data.avatar is string
+            && request.resource.data.colorHex is string
+            && request.resource.data.colorHex.matches('^#[0-9a-fA-F]{6}$')
+            && request.resource.data.archived is bool;
+        }
+
+        allow read: if isMember(hid);
+
+        /**
+         * A member document may only be created once its id is registered in the
+         * household's memberIds, which is what stops an expense naming a member
+         * that does not exist.
+         */
+        allow create: if isMember(hid)
+          && validMember()
+          && request.resource.data.createdAt == request.time
+          && getAfter(
+               /databases/$(database)/documents/households/$(hid)
+             ).data.memberIds.hasAny([id]);
+
+        // Archiving is a field change; the creation time never moves. Members are
+        // never hard-deleted, so memberIds can always be resolved.
+        allow update: if isMember(hid)
+          && validMember()
+          && request.resource.data.createdAt == resource.data.createdAt;
+
+        allow delete: if false;
+      }
+
+      // -------------------------------------------------------------- periods
+
+      match /periods/{pid} {
+        function periodDoc(hid, pid) {
+          return get(/databases/$(database)/documents/households/$(hid)/periods/$(pid));
+        }
+
+        function periodAfter(hid, pid) {
+          return getAfter(/databases/$(database)/documents/households/$(hid)/periods/$(pid));
+        }
+
+        function validPeriodShape() {
+          return request.resource.data.name is string
+            && request.resource.data.name.size() >= 1
+            && request.resource.data.name.size() <= 60
+            && isIsoDate(request.resource.data.startDate)
+            && isIsoDate(request.resource.data.endDate)
+            && request.resource.data.endDate >= request.resource.data.startDate
+            && request.resource.data.status in ['in_progress', 'settled']
+            && request.resource.data.totalAmountMinor is int
+            && request.resource.data.totalAmountMinor >= 0
+            && request.resource.data.expenseCount is int
+            && request.resource.data.expenseCount >= 0;
+        }
+
+        /** settledAt tracks the status exactly: set when settled, null otherwise. */
+        function settledAtMatchesStatus() {
+          return request.resource.data.status == 'settled'
+            ? request.resource.data.settledAt is timestamp
+            : request.resource.data.settledAt == null;
+        }
+
+        allow read: if isMember(hid);
+
+        allow create: if isMember(hid)
+          && validPeriodShape()
+          && settledAtMatchesStatus()
+          && request.resource.data.status == 'in_progress'
+          && request.resource.data.totalAmountMinor == 0
+          && request.resource.data.expenseCount == 0
+          && request.resource.data.createdAt == request.time;
+
+        allow update: if isMember(hid)
+          && validPeriodShape()
+          && settledAtMatchesStatus()
+          && request.resource.data.createdAt == resource.data.createdAt;
+
+        allow delete: if isMember(hid);
+
+        // ------------------------------------------------------------ expenses
+
+        /**
+         * Expenses live in a subcollection of the period so opening a period is
+         * one collection query and writes can be scoped to that period. They are
+         * writable only while the period is in progress: reopening it is what
+         * makes writes legal again.
+         */
+        match /expenses/{eid} {
+          function validExpense(hid, pid) {
+            return request.resource.data.name is string
+              && request.resource.data.name.size() >= 1
+              && request.resource.data.name.size() <= 60
+              && request.resource.data.description is string
+              && request.resource.data.description.size() <= 280
+              && isIsoDate(request.resource.data.date)
+              && request.resource.data.date >= periodDoc(hid, pid).data.startDate
+              && request.resource.data.date <= periodDoc(hid, pid).data.endDate
+              && request.resource.data.amountMinor is int
+              && request.resource.data.amountMinor > 0
+              && request.resource.data.amountMinor <= 1000000000
+              && request.resource.data.isPrePaid is bool
+              // isPrePaid == (paidBy != null), in both directions.
+              && request.resource.data.isPrePaid
+                   == (request.resource.data.paidBy != null)
+              && (request.resource.data.paidBy == null
+                  || hh(hid).data.memberIds.hasAny([request.resource.data.paidBy]))
+              && request.resource.data.categoryId is string
+              && isSplitMode(request.resource.data.splitMode)
+              && request.resource.data.participants is list
+              && request.resource.data.participants.size() >= 1
+              && request.resource.data.participants.size()
+                   == request.resource.data.participants.toSet().size()
+              && request.resource.data.participants.hasOnly(hh(hid).data.memberIds)
+              && request.resource.data.splitEntries is list
+              && request.resource.data.excluded is bool
+              && sharesAreSound(
+                   request.resource.data.sharesMinor,
+                   request.resource.data.amountMinor,
+                   request.resource.data.participants
+                 );
+          }
+
+          allow read: if isMember(hid);
+
+          allow create: if isMember(hid)
+            && periodAfter(hid, pid).data.status == 'in_progress'
+            && validExpense(hid, pid)
+            && request.resource.data.createdAt == request.time;
+
+          allow update: if isMember(hid)
+            && periodAfter(hid, pid).data.status == 'in_progress'
+            && validExpense(hid, pid)
+            && request.resource.data.createdAt == resource.data.createdAt;
+
+          allow delete: if isMember(hid)
+            && periodAfter(hid, pid).data.status == 'in_progress';
+        }
+      }
+
+      // ----------------------------------------------------------------- meta
+
+      match /meta/{id} {
+        allow read: if isMember(hid);
+        // Seeded once, immediately after the household is created, so the
+        // household already exists in committed state and `isMember` can see it.
+        // Nothing else writes here in v1.
+        allow create: if isMember(hid) && id == 'categories';
+        allow update, delete: if false;
+      }
+    }
+  }
+}

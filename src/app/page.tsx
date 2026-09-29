@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { PeriodTable } from "@/components/periods/PeriodTable";
 import { useHousehold } from "@/components/layout/HouseholdProvider";
-import { DevTools } from "@/components/layout/DevTools";
+import { HouseholdPanel } from "@/components/layout/HouseholdPanel";
 
 export default function Home() {
   const { household, ready } = useHousehold();
@@ -20,7 +20,7 @@ export default function Home() {
   return (
     <div className="grid gap-6">
       <PeriodTable />
-      <DevTools />
+      <HouseholdPanel />
     </div>
   );
 }

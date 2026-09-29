@@ -9,3 +9,7 @@ next-env.d.ts
 .env*.local
 .DS_Store
 npm-debug.log*
+
+# Firebase emulator artefacts (see .gitignore in firebase docs)
+.firebase/
+*-debug.log

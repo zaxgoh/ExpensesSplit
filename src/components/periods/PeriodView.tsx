@@ -31,36 +31,43 @@ import {
   computePeriodTotals,
   type PeriodTotals,
 } from "@/lib/split/account";
-import { localRepository } from "@/lib/repository/local";
-import type { Expense, ExpensePeriod, SplitEntry } from "@/types";
+import type { Expense, SplitEntry } from "@/types";
 
 /** F4, F5, F6: one expense period — its expenses, the add form, and settlement. */
 export function PeriodView({ periodId }: { periodId: string }) {
-  const { members } = useHousehold();
-  const repository = localRepository;
+  const { repository, members, periods, ready, reloadPeriods } = useHousehold();
   const router = useRouter();
 
-  const [period, setPeriod] = useState<ExpensePeriod | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [sort, setSort] = useState<ExpenseSort>({ key: "date", direction: "asc" });
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [deletingPeriod, setDeletingPeriod] = useState(false);
-  const [siblingNames, setSiblingNames] = useState<string[]>([]);
-  const [ready, setReady] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
+  const period = useMemo(
+    () => periods.find((p) => p.id === periodId) ?? null,
+    [periods, periodId],
+  );
+  // Kept for the duplicate-name check when renaming.
+  const siblingNames = useMemo(
+    () => periods.filter((p) => p.id !== periodId).map((p) => p.name),
+    [periods, periodId],
+  );
+
+  // Expenses are their own realtime subscription: §3 puts them in a subcollection
+  // of the period, so this is the one query that opens a period.
+  useEffect(() => repository.subscribeExpenses(periodId, setExpenses), [repository, periodId]);
+
+  /**
+   * Re-reads after a write so the screen is correct even on the localStorage
+   * repository, which has no listener to push the change back.
+   */
   const reload = useCallback(async () => {
-    const all = await repository.listPeriods();
-    setPeriod(all.find((p) => p.id === periodId) ?? null);
-    // Kept for the duplicate-name check when renaming.
-    setSiblingNames(all.filter((p) => p.id !== periodId).map((p) => p.name));
     setExpenses(await repository.listExpenses(periodId));
-  }, [repository, periodId]);
-
-  useEffect(() => {
-    void reload().then(() => setReady(true));
-  }, [reload]);
+    await reloadPeriods();
+  }, [repository, periodId, reloadPeriods]);
 
   const totals = useMemo(
     () => (period ? computePeriodTotals(expenses, members) : null),
@@ -84,6 +91,20 @@ export function PeriodView({ periodId }: { periodId: string }) {
 
   const settled = period.status === "settled";
 
+  /**
+   * Every mutation goes through here so a rejected write — a settled period, a
+   * date outside the period, a lost connection — surfaces as a message instead
+   * of an unhandled rejection.
+   */
+  async function run(action: () => Promise<void>) {
+    try {
+      setActionError(null);
+      await action();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "That change could not be saved.");
+    }
+  }
+
   async function handleSubmit(input: {
     date: string;
     name: string;
@@ -96,43 +117,53 @@ export function PeriodView({ periodId }: { periodId: string }) {
     splitEntries: SplitEntry[];
     sharesMinor: Record<string, number>;
   }) {
-    if (editing) {
-      await repository.updateExpense(editing.id, periodId, input as Partial<Expense>);
-    } else {
-      await repository.createExpense({
-        ...input,
-        periodId,
-        categoryId: "other",
-        excluded: false,
-      } as never);
-    }
-    setFormOpen(false);
-    setEditing(null);
-    await reload();
+    await run(async () => {
+      if (editing) {
+        await repository.updateExpense(editing.id, periodId, input as Partial<Expense>);
+      } else {
+        await repository.createExpense({
+          ...input,
+          periodId,
+          categoryId: "other",
+          excluded: false,
+        } as never);
+      }
+      setFormOpen(false);
+      setEditing(null);
+      await reload();
+    });
   }
 
   async function setStatus(status: "in_progress" | "settled") {
-    await repository.updatePeriod(periodId, {
-      status,
-      settledAt: status === "settled" ? Date.now() : null,
+    await run(async () => {
+      await repository.updatePeriod(periodId, {
+        status,
+        settledAt: status === "settled" ? Date.now() : null,
+      });
+      await reload();
     });
-    await reload();
   }
 
   async function renamePeriod(next: string) {
-    await repository.updatePeriod(periodId, { name: next });
-    await reload();
+    await run(async () => {
+      await repository.updatePeriod(periodId, { name: next });
+      await reload();
+    });
   }
 
   async function deleteExpense(expense: Expense) {
-    await repository.deleteExpense(expense.id, periodId);
-    setDeletingExpense(null);
-    await reload();
+    await run(async () => {
+      await repository.deleteExpense(expense.id, periodId);
+      setDeletingExpense(null);
+      await reload();
+    });
   }
 
   async function deletePeriod() {
-    await repository.deletePeriod(periodId);
-    router.push("/");
+    await run(async () => {
+      await repository.deletePeriod(periodId);
+      router.push("/");
+    });
   }
 
   return (
@@ -183,6 +214,10 @@ export function PeriodView({ periodId }: { periodId: string }) {
             variant="outline"
             onClick={() => setDeletingPeriod(true)}
             className="text-muted-foreground hover:text-negative"
+            // F8: delete controls are hidden while a period is settled, and the
+            // Firestore rules enforce the same thing — a settled period's
+            // expenses cannot be deleted, so its cascade delete cannot run.
+            disabled={settled}
           >
             <Trash2 className="mr-2 h-4 w-4" aria-hidden />
             Delete period
@@ -193,6 +228,12 @@ export function PeriodView({ periodId }: { periodId: string }) {
       {settled ? (
         <p className="rounded-lg border border-positive/40 bg-positive/10 p-3 text-sm">
           This period is settled and read-only. Reopen it to make changes.
+        </p>
+      ) : null}
+
+      {actionError ? (
+        <p role="alert" className="rounded-lg border border-negative/40 bg-negative/10 p-3 text-sm">
+          {actionError}
         </p>
       ) : null}
 

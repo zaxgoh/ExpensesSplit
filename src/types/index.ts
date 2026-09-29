@@ -55,12 +55,40 @@ export type Expense = {
   updatedAt: number;
 };
 
+/**
+ * Households are keyed by the anonymous Firebase uid (§7 of PLAN.md). There is
+ * no login, so `memberUids` is the entire access control list and must exist
+ * from day one even though it always holds exactly one entry in v1 — the
+ * join-link feature later depends on it.
+ *
+ * `memberIds` is a separate, append-only list of the household's member
+ * document ids. It exists purely so the Firestore rules can answer "is this
+ * participant a real member?" without a loop, which the rules language has no
+ * way to express. It is never pruned: archiving a member leaves the id in place
+ * so historical expenses stay referentially valid.
+ */
 export type Household = {
   id: string;
   name: string;
+  /** Always exactly one entry in v1: the anonymous uid that created it. */
+  memberUids: string[];
+  /** Append-only list of member document ids, kept in step by the repository. */
+  memberIds: string[];
+  settings: HouseholdSettings;
   schemaVersion: number;
   createdAt: number;
   updatedAt: number;
+};
+
+export type HouseholdSettings = {
+  defaultCategoryId: string;
+};
+
+export type Category = {
+  id: string;
+  label: string;
+  icon: string;
+  colorHex: string;
 };
 
 export type StatusFilter = "all" | PeriodStatus;
