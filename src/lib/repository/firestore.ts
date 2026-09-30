@@ -49,7 +49,6 @@ import {
   ensureSignedIn,
   getDb,
   getStoredHouseholdId,
-  initAppCheck,
   setStoredHouseholdId,
 } from "@/lib/firebase/client";
 import {
@@ -207,7 +206,6 @@ async function patchDoc(db: Firestore, path: string, fields: DocumentData): Prom
 // ---------------------------------------------------------------- identity
 
 let householdIdPromise: Promise<string> | null = null;
-let appCheckStarted = false;
 
 /**
  * The household id is the anonymous uid. `ensureSignedIn` is memoised so a page
@@ -219,10 +217,6 @@ let appCheckStarted = false;
 function householdId(): Promise<string> {
   if (!householdIdPromise) {
     householdIdPromise = (async () => {
-      if (!appCheckStarted) {
-        appCheckStarted = true;
-        void initAppCheck();
-      }
       const uid = await ensureSignedIn();
       if (getStoredHouseholdId() !== uid) setStoredHouseholdId(uid);
       return uid;
@@ -234,7 +228,6 @@ function householdId(): Promise<string> {
 /** Test seam: forget the memoised uid so the next call signs in again. */
 export function resetFirebaseIdentity(): void {
   householdIdPromise = null;
-  appCheckStarted = false;
 }
 
 function asError(error: unknown): Error {

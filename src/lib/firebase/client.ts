@@ -6,9 +6,9 @@
  * module still guards on `typeof window` because Next.js evaluates imported
  * modules during the production build.
  *
- * The emulator wiring is behind a `process.env` constant that is inlined at
- * build time, so `firebase/.../emulator` calls are dropped entirely from an App
- * Hosting build where `NEXT_PUBLIC_USE_FIREBASE_EMULATORS` is "false".
+ * There is no emulator wiring. Local development and App Hosting both talk to
+ * the real project, so `NEXT_PUBLIC_FIREBASE_*` is the only configuration and
+ * there is no mode to flip. See README, 'Firebase configuration'.
  */
 
 import { initializeApp, type FirebaseApp, type FirebaseOptions } from "firebase/app";
@@ -19,11 +19,6 @@ import {
   persistentMultipleTabManager,
   type Firestore,
 } from "firebase/firestore";
-import { connectEmulators } from "@/lib/firebase/emulator";
-
-export const useEmulators = process.env.NEXT_PUBLIC_USE_FIREBASE_EMULATORS === "true";
-
-export const apphostingBackendId = process.env.NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID ?? "";
 
 /** The API key is not a secret — it ships in the client bundle by design. */
 function readConfig(): FirebaseOptions {
@@ -60,7 +55,6 @@ export function getDb(): Firestore {
   firestore = initializeFirestore(getFirebaseApp(), {
     localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
   });
-  if (useEmulators) connectEmulators(firestore, getFirebaseAuth());
   return firestore;
 }
 
@@ -70,28 +64,6 @@ export function getFirebaseAuth(): Auth {
   if (auth) return auth;
   auth = getAuth(getFirebaseApp());
   return auth;
-}
-
-/**
- * App Check is the security control that makes the no-auth model safe: it is
- * what stops a script from calling Firestore anonymously on its own. It is not
- * initialised without a site key, which is the local case — the emulator
- * accepts App Check tokens without one.
- *
- * Deliberately not listed in firestore.rules: rules cannot read a build flag,
- * so enforcement is switched on in the console, where it can be applied to Auth
- * and Firestore together.
- */
-export async function initAppCheck(): Promise<void> {
-  if (typeof window === "undefined") return;
-  const siteKey = process.env.NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY;
-  if (!siteKey || useEmulators) return;
-
-  const { initializeAppCheck, ReCaptchaEnterpriseProvider } = await import("firebase/app-check");
-  initializeAppCheck(getFirebaseApp(), {
-    provider: new ReCaptchaEnterpriseProvider(siteKey),
-    isTokenAutoRefreshEnabled: true,
-  });
 }
 
 /**

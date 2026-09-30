@@ -20,52 +20,31 @@ cp .env.local.example .env.local
 | Variable | Notes |
 |---|---|
 | `NEXT_PUBLIC_FIREBASE_API_KEY` … `NEXT_PUBLIC_FIREBASE_APP_ID` | The web app config. The API key is **not** a secret — it ships in the client bundle by design. |
-| `NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID` | Empty until an App Hosting backend exists. |
-| `NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY` | reCAPTCHA Enterprise site key. Empty locally; the emulator accepts App Check tokens without one. |
-| `NEXT_PUBLIC_USE_FIREBASE_EMULATORS` | `true` locally, `false` everywhere else. Never `true` in App Hosting. |
 
 Project: **`expensessplit-cb870`**, Firestore region **`asia-southeast1`** (Singapore).
 
-## Run it
+**There is no emulator.** Local development talks to the real project, so `.env.local` and
+`apphosting.yaml` hold identical values and there is no mode flag to flip. Local writes are real
+writes: the data is scoped to your own anonymous household by `firestore.rules`, but it is not
+disposable, and you are billed for it.
 
-The Firestore emulator is mandatory locally: the rules are only testable against it, and it keeps
-local data off production. It needs **Java 11+** installed (`java -version`).
+## Run it
 
 ```bash
 npm install
-npm run emulators        # Firestore :8080, Auth :9099, App Check :9199, UI :4000
-npm run dev              # http://localhost:3000, against the emulator
+npm run dev              # http://localhost:3000, against the real project
 ```
 
 Open http://localhost:3000. You land on `/setup` to name the household and add at least two
 members. After that, `/` is the expense period table.
-
-### Demo data
-
-```bash
-npm run seed:emulator -- --household=<uid>
-```
-
-Run the app first and read `1stsplit:householdId` out of the browser's localStorage — that is your
-anonymous uid, and the rules only let it touch its own household. The seed then fills it with 5
-members, 3 periods (two deliberately overlapping) and 30 expenses across all three split modes and
-both funding sources. Re-running it replaces the demo periods outright.
-
-Without `--household` it creates a standalone household and prints its id. That one is useful for
-poking at in the emulator UI but the app will not be signed in as it, so you cannot open it from
-the browser.
 
 ## Verify
 
 ```bash
 npm run typecheck   # tsc --noEmit
 npm test            # vitest: split engine, settlement maths, components (jsdom)
-npm run test:rules  # vitest + @firebase/rules-unit-testing — NEEDS `npm run emulators` running
 npm run build       # production build
 ```
-
-`npm run test:rules` is deliberately a separate script and not part of `npm test`: it needs a
-running emulator, so folding it in would make the unit suite fail on any machine without Java.
 
 ## Deploying
 
@@ -84,19 +63,40 @@ Steps, in order:
 
 1. Grant the Firebase App Hosting GitHub app access to this repository.
 2. Create a backend against it (`firebase apphosting:backends:create`), picking the live branch.
-3. Set the backend id as `NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID`, either in `apphosting.yaml` or
-   in App Hosting → Settings → Environment — console values override the file. Same for
-   `NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY` once App Check exists. Both are absent from
-   `apphosting.yaml` today because their values are not known yet; the app treats absent and empty
-   the same.
-4. Register the backend's `*.hosted.app` domain (and any custom domain) in **App Check** →
-   allowed domains, *then* enforce App Check on Firestore and Auth. Note that App Hosting serves
-   from `hosted.app`, not `web.app`; enforcing before the domain is registered locks the app out of
-   its own database.
+   **Pass `--primary-region asia-southeast1`** to match the Firestore location — the default
+   `us-central1` puts every read and write across the Pacific.
+3. **Enable Anonymous sign-in** in the console (Authentication → Sign-in method). `ensureSignedIn`
+   throws without it and the deployed app cannot create a household. There is no code change and no
+   env var for this — it is a console setting.
+4. Push to the live branch, then `npm run deploy:rules` so production Firestore is running the
+   rules in this repo.
 5. Set a Cloud Billing budget alert and enable the Firestore backup schedule.
+
+Nothing in `apphosting.yaml` needs filling in — the backend id is not an env var the app reads, and
+App Check is not in use. See the note below on what that means for the security model.
+
+### Security without App Check
+
+The app deliberately has no login, so it is worth being precise about what does and does not protect
+the data.
+
+**Still protected.** `firestore.rules` authorise every read and write on `households/{uid}.memberUids`.
+A signed-in anonymous uid can only touch the household that contains it, `memberUids` is immutable
+after creation, and members and meta documents are never deletable. One household cannot read or
+write another's data, with or without App Check.
+
+**Not protected.** Anonymous sign-in is open, so any script can create a household and write expenses
+to it. App Check is what stops that. Without it, the exposure is abuse and runaway spend rather than
+a data leak: a bot can inflate your Firestore bill and litter the household list. Anonymous accounts
+also accumulate in Authentication, which has its own quota.
+
+Worth setting a billing budget alert (step 5) for that reason. If abuse becomes a problem, adding
+App Check later is self-contained: it is one env var with `BUILD` availability, a few lines in
+`src/lib/firebase/client.ts`, and a one-time call before the first Firestore read.
 
 `apphosting.staging.yaml` and `apphosting.local.yaml` do not exist yet — the CLI generates the
 latter when a backend is created, and the former only matters once there is a staging backend.
+`apphosting.local.yaml` is gitignored, since it may hold plaintext secrets.
 
 ### `apphosting.yaml` gotcha
 
@@ -164,5 +164,13 @@ behalf.
   to the ESLint CLI.
 - `npm audit` reports vulnerabilities in the shadcn/Radix dependency tree. Worth resolving before
   any deploy.
-- The Firestore emulator downloads a JAR and needs **Java 11+** on the machine. That is the only
-  local prerequisite beyond Node 20, and it is the reason `npm run test:rules` cannot run here yet.
+- **`firestore.rules` has no automated test coverage.** `@firebase/rules-unit-testing` only works
+  against the Firestore emulator, and there is no emulator here, so `tests/firestore.rules.test.ts`
+  was removed rather than kept half-working. The rules are the only thing stopping one household
+  from reading another's data, and nothing checks them now: a future edit that opens a hole will
+  ship silently. Reinstating the suite is straightforward — add `@firebase/rules-unit-testing` and
+  a `firestore` block to `firebase.json`, restore the test file, and run it in GitHub Actions so
+  contributors still need no Java installed.
+- Local development writes to the real project. There is no disposable environment, so `npm run
+  dev` creates real households, real anonymous accounts in Authentication, and real Firestore
+  reads/writes that count toward billing.

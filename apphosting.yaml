@@ -1,5 +1,6 @@
 # Firebase App Hosting configuration. Committed; contains no secrets — the web
-# API key is not a secret. App Check and Auth are what actually protect the data.
+# API key is not a secret, and Firestore security rules are what actually
+# protect the data.
 #
 # Format note: `availability` must be a BLOCK sequence. The flow form
 # `availability: [BUILD, RUNTIME]` is valid YAML but is rejected by App Hosting's
@@ -56,29 +57,3 @@ env:
       - BUILD
       - RUNTIME
 
-  # Never true here: it would point production at localhost. The app uses the
-  # local emulator suite instead.
-  - variable: NEXT_PUBLIC_USE_FIREBASE_EMULATORS
-    value: "false"
-    availability:
-      - BUILD
-      - RUNTIME
-
-# Two variables are deliberately absent because their values are not known yet.
-# Add them here once you have the values, in the same block form as above:
-#
-#   - variable: NEXT_PUBLIC_FIREBASE_APPHOSTING_BACKEND_ID
-#     value: "<backend-id>"
-#     availability:
-#       - BUILD
-#       - RUNTIME
-#
-#   - variable: NEXT_PUBLIC_FIREBASE_APPCHECK_SITE_KEY
-#     value: "<reCAPTCHA Enterprise site key>"
-#     availability:
-#       - BUILD
-#       - RUNTIME
-#
-# Both are read defensively in src/lib/firebase/client.ts, so an absent variable
-# behaves the same as an empty one. Console-set values override this file, so
-# the backend id can equally live in App Hosting → Settings → Environment.

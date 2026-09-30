@@ -10,6 +10,11 @@ next-env.d.ts
 .DS_Store
 npm-debug.log*
 
-# Firebase emulator artefacts (see .gitignore in firebase docs)
+# Firebase CLI artefacts
 .firebase/
 *-debug.log
+
+# Local-only App Hosting overrides. May contain secret values in plaintext, so
+# Firebase's docs say never to commit it. (apphosting.yaml is safe to commit and
+# is deliberately tracked.)
+apphosting.local.yaml
