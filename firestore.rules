@@ -36,7 +36,7 @@ service cloud.firestore {
 
     /** Reads and most writes are authorised on the household's memberUids. */
     function isMember(hid) {
-      return isSignedIn() && request.auth.uid() in hh(hid).data.memberUids;
+      return isSignedIn() && request.auth.uid in hh(hid).data.memberUids;
     }
 
     function isIsoDate(value) {
