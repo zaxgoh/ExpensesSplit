@@ -36,7 +36,20 @@ service cloud.firestore {
 
     /** Reads and most writes are authorised on the household's memberUids. */
     function isMember(hid) {
-      return isSignedIn() && request.auth.uid in hh(hid).data.memberUids;
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/households/$(hid))
+        && request.auth.uid in hh(hid).data.memberUids;
+    }
+
+    /**
+     * First run: the household document does not exist yet. A `get()` on a
+     * missing document errors, which would deny every read below and tear down
+     * the app's realtime listeners before setup can create the household.
+     * `exists()` is a path check rather than a document read, so a missing path
+     * yields nothing. This only permits reading paths that hold no data.
+     */
+    function householdMissing(hid) {
+      return !exists(/databases/$(database)/documents/households/$(hid));
     }
 
     function isIsoDate(value) {
@@ -77,7 +90,7 @@ service cloud.firestore {
         && request.resource.data.memberIds.size() == 0
         && request.resource.data.createdAt == request.time;
 
-      allow read: if isMember(hid);
+      allow read: if isMember(hid) || householdMissing(hid);
 
       /**
        * `memberUids` is immutable — it is the access control list, and letting
@@ -115,7 +128,7 @@ service cloud.firestore {
             && request.resource.data.archived is bool;
         }
 
-        allow read: if isMember(hid);
+        allow read: if isMember(hid) || householdMissing(hid);
 
         /**
          * A member document may only be created once its id is registered in the
@@ -170,7 +183,7 @@ service cloud.firestore {
             : request.resource.data.settledAt == null;
         }
 
-        allow read: if isMember(hid);
+        allow read: if isMember(hid) || householdMissing(hid);
 
         allow create: if isMember(hid)
           && validPeriodShape()
@@ -230,7 +243,7 @@ service cloud.firestore {
                  );
           }
 
-          allow read: if isMember(hid);
+          allow read: if isMember(hid) || householdMissing(hid);
 
           allow create: if isMember(hid)
             && periodAfter(hid, pid).data.status == 'in_progress'
@@ -250,7 +263,7 @@ service cloud.firestore {
       // ----------------------------------------------------------------- meta
 
       match /meta/{id} {
-        allow read: if isMember(hid);
+        allow read: if isMember(hid) || householdMissing(hid);
         // Seeded once, immediately after the household is created, so the
         // household already exists in committed state and `isMember` can see it.
         // Nothing else writes here in v1.
