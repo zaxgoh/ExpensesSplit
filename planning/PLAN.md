@@ -134,8 +134,7 @@ collection query.
 src/
   app/
     layout.tsx                    # <html>/<body> shell, fonts, HouseholdProvider
-    page.tsx                      # home: expense period table
-    setup/page.tsx                # first run: household name + members
+    page.tsx                      # home: expense period table + first-run setup dialog
     period/[periodId]/page.tsx    # expenses table + settlement for one period
     globals.css
   components/
@@ -145,7 +144,7 @@ src/
                    InlinePeriodName, ConfirmDeleteDialog, PeriodView
     expenses/      ExpenseTable, AddExpenseForm
     settlement/    TransferSummary
-    members/       SetupForm
+    members/       HouseholdSetupDialog (first-run modal: household name + members)
   lib/
     repository/    types.ts (the Repository interface), local.ts (localStorage impl)
     firebase/      client.ts, emulator.ts, paths.ts
@@ -420,13 +419,24 @@ their name as "Removed member"; a float amount with more than two decimals (reje
 |---|---|
 | `/` | Home: the expense period table, with status filter and create button |
 | `/period/[periodId]` | One period: its expense table, add-expense form, settlement summary, settle/reopen |
-| `/setup` | First run only: household name, then add members |
 | `/share` | Explains how to reach this household from another device |
 
 ### F1 — first run
 
-No household id in browser storage → redirect to `/setup` → household name → add ≥2 members (inline,
-live avatar preview) → "Continue" → `/`. `/setup` asks for no currency.
+There is no setup route and no "start new household" button. The app holds exactly one household
+per installation, so the first run is a dialog on `/`, not a separate destination.
+
+- After the silent anonymous sign-in (§7), `/` checks for the household document. If it exists,
+  the expense period table renders directly (F2), and the members persisted at setup are already
+  available to assign to expenses.
+- If no household document exists — Firestore is empty for this uid — `/` opens a **first-run
+  setup dialog**: a centred modal on desktop, a full-screen sheet on mobile. It asks for the
+  household name and at least two members (inline, live avatar preview). It asks for no currency.
+- **Continue** creates the household document and the member documents, closes the dialog, and
+  reveals the period table. The dialog appears only while the household document is missing; there
+  is no button, link, or route that opens it once a household exists. Starting over means clearing
+  site data, which issues a fresh anonymous uid and therefore a fresh, empty household (see the
+  accepted risks in §7).
 
 ### F2 — the home page: expense periods
 
@@ -478,7 +488,7 @@ name, date range, total, `StatusBadge`) above a **table of expenses** with these
 | 1 | Date | `date`, formatted `MMM D, YYYY`; sortable |
 | 2 | Name | `name`; opens the edit form when clicked; sortable |
 | 3 | Description | `description`, or an em dash when empty |
-| 4 | Prepaid | `Yes` / `No`; `No` gets a muted "from account" hint |
+| 4 | Prepaid | `Yes — <member name>` for a pre-paid expense — the member who fronted it (`paidBy`; "Removed member" if they have since been removed) — or `No` with a muted "from account" hint |
 | 5 | Mode of split | `Equal` / `Exact` / `Percentage` |
 | 6 | Amount | `amountMinor` as `$X,XXX.XX`; sortable |
 | 7 | Actions | a delete button (see F9) |
@@ -501,7 +511,10 @@ already uses (case-insensitively, excluding this period's own current name). Ren
 the period is settled.
 
 If the period is `settled`, the add/edit/delete controls and the table rows are read-only, and a
-**Reopen period** button is shown in the header (F6).
+**Reopen period** button is shown in the header (F6). While a period is `in progress` its page
+keeps the Expenses and Settlement tabs (the add form and the settle action live there); once it is
+settled the tabs are dropped and the page renders the restructured layout described at the end of
+F6 — settled amounts at the top, the expense table below.
 
 ### F5 — add an expense
 
@@ -556,12 +569,33 @@ A **Settlement card** on the period page, headed "Household account — <period 
   `1ST split — Holiday 2026: Alex → household account $180; Sam → household account $95.`
 - A **Settle period** button, enabled only when the period is `in progress`. Clicking it asks for
   confirmation, then sets `status: "settled"` and `settledAt: <now>`. The period's expenses become
-  read-only, and the table shows a settled banner.
+  read-only, and the page switches to the settled layout below.
 - On a settled period the card is read-only and shows a **Reopen period** button, which asks for
   confirmation and sets `status: "in_progress"` and `settledAt: null`. Reopening does not delete
   anything and does not alter any existing expense or transfer figure.
 - Each member row shows the **exact** figure in cents beneath the rounded transfer, so the arithmetic
   is inspectable without a separate drill-in popover.
+
+**The settled period page.** Once a period is settled, its page stops using the
+Expenses/Settlement tabs and renders a single column, top to bottom:
+
+1. **The settled amounts section** — the settlement card above (funding line, one row per
+   member with a non-zero transfer, exact cents beneath each rounded figure), read-only,
+   with its **Copy all** button.
+2. **The expense table** under an "Expenses" heading — the same F4 table, read-only, its
+   sortable headers still working. A settled period with zero expenses shows the empty
+   state without the "Add one" hint.
+3. **A copy link button** beside Copy all, which copies the page's URL (`window.location.href`)
+   to the clipboard and confirms with a "Copied" label, so the URL can be sent to other
+   members to bring them directly to this settled expense period page. It appears on
+   settled pages only. In Phase 1 the copied URL opens the period on the same device or
+   browser (the data is in localStorage); a link another member can open on their own
+   device arrives with the join-link feature in §7.
+
+The green "settled and read-only" banner is dropped in this layout — the `Settled` badge in
+the header and the restructured page itself carry that information, and the **Reopen period**
+button stays in the header (F6). An `in progress` period keeps the tabbed layout and shows
+no copy link button.
 
 ### F7 — remove a member
 
@@ -663,13 +697,17 @@ action rather than a selected state, and its only visual difference is a fill.
    `In progress` / `Settled` filter as a dropdown above the table showing counts.
 3. **CreatePeriodDialog** — name plus two dropdown date pickers (F3).
 4. **ExpenseTable** — the F4 table: Date / Name / Amount sortable, per-row edit and delete, read-only
-   when the period is settled.
+   when the period is settled. Takes the household's member list so the Prepaid column can name
+   the fronting member (`Yes — Alex`, or "Removed member" for a fronting member who has since been
+   removed); the column stays non-sortable.
 5. **AddExpenseForm** — F5, including the `Prepaid by a member` checkbox with its "Fronted by"
    dropdown, and the `Equal` / `Exact` / `Percentage` split editor — a mode dropdown plus a checkbox
    per member — with a live preview. The split section is hidden entirely while pre-paid, replaced by
    a reimbursement summary.
 6. **TransferSummary** — the F6 settlement card: funding line, per-member transfer rows, copy-all,
-   Settle / Reopen.
+   Settle / Reopen. On a settled period it also renders the **Copy link** button (copying the page
+   URL) beside Copy all, and it doubles as the settled amounts section at the top of the settled
+   page (F6).
 7. **DatePicker** — shadcn `Popover` + `Calendar`. Must use the shadcn `Calendar` wrapper, **not** a
    bare `DayPicker`: the raw component ships with no `classNames`, which renders cramped day cells.
    The caption is `captionLayout="dropdown"`, giving **separate month and year select lists** so a
@@ -685,6 +723,10 @@ action rather than a selected state, and its only visual difference is a fill.
    the collateral ("this also deletes the 12 expenses inside it").
 10. **Toasts** — bottom-centre on mobile, bottom-right on desktop. Reserved for non-destructive
     confirmations; **not** used to offer Undo for a delete (F8).
+11. **HouseholdSetupDialog** — the F1 first-run modal (shadcn `Dialog`, full-screen sheet on
+    mobile): household name input plus ≥2 member inputs with live avatar preview, and a
+    **Continue** action that creates the household and its members. Rendered by the home page only
+    while no household document exists; no button or route opens it otherwise.
 
 ### Guarding the shadcn primitives
 
@@ -703,8 +745,8 @@ optional field defaulting to `other`; it is not a required column of the expense
 ### Accessibility
 
 WCAG 2.1 AA, and part of the definition of done:
-- Full keyboard path through create-period, add-expense, save, settle, reopen, rename, delete, and
-  dialog close (`Esc`).
+- Full keyboard path through create-period, add-expense, save, settle, reopen, rename, copy link,
+  delete, and dialog close (`Esc`).
 - The period and expense tables are real `<table>` markup with `<th scope="col">` headers, so column
   association survives; a row is opened via a link/button inside the name cell rather than a click
   handler alone, so it is reachable by keyboard.
@@ -734,6 +776,11 @@ first visit
   → the returned uid becomes the household document id
   → persist id + a 128-bit join secret to localStorage
   → ready
+  → households/{uid} exists?
+      yes → `/` renders the period table (F2); the members stored at setup
+            are already there and assignable to expenses
+      no  → Firestore is empty for this household → `/` opens the first-run
+            setup dialog (F1): household name + ≥2 members → create → period table
 ```
 
 This is the load-bearing decision. Without it, either the Firestore rules are open (anyone can read
@@ -1005,9 +1052,9 @@ keeps local data off production.
 | Date picker | Vitest + Testing Library | the calendar exposes two caption dropdowns (month, year); the year list spans 2020–2030; out-of-range days are disabled; an empty picker opens on the current month; choosing a day emits an ISO date |
 | Firestore rules | `@firebase/rules-unit-testing` | unauthenticated read denied; non-member read/write denied; bad `amountMinor`/`name`/`participants` rejected; `isPrePaid` true with null `paidBy` (and the reverse) rejected; expense `date` outside the period rejected; **expense write to a `settled` period rejected** and the same write to an `in_progress` period allowed; `createdAt` mutation rejected; cross-household write denied |
 | UI guard | Vitest | the shadcn primitives still carry the 44px size classes, and no animation library is present (§6) |
-| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen |
-| E2E | Playwright (deferred) | setup → create period → add a pre-paid and an account-paid expense → see transfer amounts → settle → reopen → reload → data still there |
-| Accessibility | axe-core (deferred with Playwright) | zero serious/critical on `/`, `/setup` and `/period/[id]` |
+| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member ("Yes — Alex") and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page** |
+| E2E | Playwright (deferred) | first-run setup dialog → create period → add a pre-paid and an account-paid expense → see transfer amounts → settle → reopen → reload → data still there |
+| Accessibility | axe-core (deferred with Playwright) | zero serious/critical on `/` (including the first-run setup dialog) and `/period/[id]` |
 
 **Test timeout.** Component tests drive real Radix primitives through `userEvent`, which is slow in
 jsdom and varies with machine load. Raise the Vitest timeout to roughly 30s; the 5s default produces
@@ -1064,6 +1111,8 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
       without relying on colour alone
 - [ ] Expenses cannot be added, edited or deleted in a settled period, and a reopened period accepts
       them again
+- [ ] The Prepaid column names the member who fronted a pre-paid expense ("Yes — Alex"),
+      and shows "Removed member" when that member has since been removed
 
 **Deletion**
 - [ ] Deletion is permanent and always confirmed; no UI or documentation implies it can be undone
@@ -1080,6 +1129,19 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
 - [ ] The funding line is labelled as the account's own money, not a member's debt
 - [ ] No member-to-member payment is shown anywhere
 - [ ] Settling a period locks it; reopening unlocks it and changes nothing else
+- [ ] A settled period page drops the tabs and shows the settled amounts (funding line and
+      per-member transfers) at the top, the expense table below under an "Expenses"
+      heading, and a copy-link button that copies the page URL
+- [ ] An in-progress period page keeps the Expenses/Settlement tabs and shows no copy-link
+      button
+
+**First run**
+- [ ] With no household document in Firestore, `/` opens a centred setup dialog (full-screen sheet
+      on mobile) for the household name and ≥2 members with live avatar preview; **Continue**
+      creates the household and its members and reveals the period table
+- [ ] On a return visit, when the household document exists, `/` shows the period table directly —
+      no setup route and no "start new household" button
+- [ ] Members created at setup persist, so the add-expense form can assign expenses to them
 
 **Persistence**
 - [ ] Members, periods, expenses and settings survive a full reload and a browser restart
@@ -1128,6 +1190,10 @@ around it.
 | 14 | **Deleting an expense or period is permanent and always confirmed** | Chosen over a soft delete. The dialog names the collateral so a misclick is survivable; no Undo anywhere |
 | 15 | **A period is renamed inline from its page header only** | One obvious place to edit it; the home table displays the result but is not itself editable |
 | 16 | **The front end was built first against a `localStorage` repository, then swapped to Firestore** | Lets the whole UI, the split engine and every interaction be built and tested before a backend exists. The `Repository` interface makes the swap one file |
+| 17 | **One household per installation; the first run is a dialog on `/`, not a route** | The app holds exactly one household, so there is no "start new household" entry point. A missing household document opens the setup modal inline; an existing one goes straight to the period table, with members already persisted |
+| 18 | **The Prepaid column names the fronting member** | The money model has exactly one fronting member per expense (`paidBy`), so the column shows "Yes — Alex" rather than a bare "Yes"; a since-removed fronting member reads as "Removed member" (§4) |
+| 19 | **Settled period pages restructure; in-progress pages keep tabs** | A settled period is a statement to read and share: settled amounts at the top, the expense table below, no tabs. In-progress periods keep the Expenses/Settlement tabs where the add form and the settle action live |
+| 20 | **Copy link copies the page URL, on settled pages only** | The page URL is the cheapest thing that "brings a member directly to this settled expense period page". Phase 1 (localStorage) links open on the same device; cross-device arrival is the deferred join-link feature (§7), which needs no change here |
 
 ---
 
@@ -1138,7 +1204,7 @@ The spec is one application, but it was built in two passes and the order matter
 **Phase 1 — client only.** `Repository` backed by `localStorage`, so the entire UI, the split engine,
 the settlement maths and every interaction can be built and tested with no backend. `signInAnonymously`
 in §7 is *not* wired up in this phase; there is no Firebase dependency yet, and `getHousehold()`
-returning `null` is what routes to `/setup`.
+returning `null` is what opens the first-run setup dialog on `/`.
 
 **Phase 2 — Firebase.** Implement `Repository` against the Firestore SDK, add `firestore.rules` and
 `firestore.indexes.json`, wire the silent anonymous sign-in, App Check, and App Hosting. Everything
