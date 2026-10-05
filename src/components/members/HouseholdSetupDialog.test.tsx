@@ -1,29 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { SetupForm } from "@/components/members/SetupForm";
+import { HouseholdSetupDialog } from "@/components/members/HouseholdSetupDialog";
 import { HouseholdProvider } from "@/components/layout/HouseholdProvider";
 import { localRepository } from "@/lib/repository/local";
+import { AVATARS } from "@/lib/members/avatars";
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useParams: () => ({}),
-}));
-
-async function mountSetup() {
+async function mountDialog() {
   const user = userEvent.setup();
   render(
     <HouseholdProvider repository={localRepository}>
-      <SetupForm />
+      <HouseholdSetupDialog open onOpenChange={() => {}} />
     </HouseholdProvider>,
   );
   await waitFor(() => expect(screen.queryByText(/^loading/i)).not.toBeInTheDocument());
   return user;
 }
 
-describe("first run setup", () => {
+describe("first run setup dialog", () => {
   it("asks for a household name and members, and never for a currency", async () => {
-    await mountSetup();
+    await mountDialog();
     expect(screen.getByLabelText(/household name/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/members/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/currency/i)).not.toBeInTheDocument();
@@ -31,14 +27,14 @@ describe("first run setup", () => {
   });
 
   it("requires at least two members before continuing", async () => {
-    const user = await mountSetup();
+    const user = await mountDialog();
     await user.type(screen.getByLabelText(/household name/i), "Maple Street");
     await user.click(screen.getByRole("button", { name: /continue/i }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/at least two members/i);
   });
 
   it("rejects a duplicate member name", async () => {
-    const user = await mountSetup();
+    const user = await mountDialog();
     const field = screen.getByLabelText(/members/i);
     await user.type(field, "Alex");
     await user.click(screen.getByRole("button", { name: /^add$/i }));
@@ -49,8 +45,22 @@ describe("first run setup", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/already added/i);
   });
 
+  it("previews a distinct avatar per member as they are added", async () => {
+    const user = await mountDialog();
+    const field = screen.getByLabelText(/members/i);
+    await user.type(field, "Alex");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+    await user.type(field, "Sam");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    const alex = screen.getByText("Alex").closest("li");
+    const sam = screen.getByText("Sam").closest("li");
+    expect(alex).toHaveTextContent(AVATARS[0]);
+    expect(sam).toHaveTextContent(AVATARS[1]);
+  });
+
   it("creates the household and members with no currency stored", async () => {
-    const user = await mountSetup();
+    const user = await mountDialog();
     await user.type(screen.getByLabelText(/household name/i), "Maple Street");
     for (const name of ["Alex", "Sam"]) {
       await user.type(screen.getByLabelText(/members/i), name);
@@ -65,6 +75,8 @@ describe("first run setup", () => {
 
     const members = await localRepository.listMembers();
     expect(members.map((m) => m.name)).toEqual(["Alex", "Sam"]);
+    // Avatars round-robin, matching the live preview on the chips.
+    expect(members.map((m) => m.avatar)).toEqual([AVATARS[0], AVATARS[1]]);
     // No currency field exists anywhere in the stored household.
     expect(JSON.stringify(await localRepository.getHousehold())).not.toMatch(/currency/i);
   });

@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { firestoreRepository } from "@/lib/repository/firestore";
+import { localRepository } from "@/lib/repository/local";
 import type { Repository } from "@/lib/repository/types";
 import type { Category, ExpensePeriod, Household, Member } from "@/types";
 
@@ -40,7 +40,7 @@ const HouseholdContext = createContext<HouseholdContextValue | null>(null);
  */
 export function HouseholdProvider({
   children,
-  repository = firestoreRepository,
+  repository = localRepository,
 }: {
   children: ReactNode;
   repository?: Repository;
@@ -76,7 +76,7 @@ export function HouseholdProvider({
         handle((next) => {
           setHousehold(next);
           // Resolved either way: a missing document is the first-run state, not
-          // a failure, and it is what routes to /setup.
+          // a failure, and it is what opens the first-run setup dialog.
           setStatus((current) => (current === "error" ? current : "ready"));
         }),
         fail,

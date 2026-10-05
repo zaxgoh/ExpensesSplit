@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, RotateCcw } from "lucide-react";
+import { Check, Copy, Link2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatMoney, formatMoneyWhole } from "@/lib/money/minorUnits";
 import type { PeriodTotals } from "@/lib/split/account";
@@ -10,6 +10,7 @@ import type { ExpensePeriod, Member } from "@/types";
 /**
  * F6: the settlement card. Shows each member's transfer against the household
  * account, using the whole-dollar settled figures from PLAN.md section 4.
+ * On a settled period it also renders the Copy link button beside Copy all.
  */
 export function TransferSummary({
   period,
@@ -25,6 +26,7 @@ export function TransferSummary({
   onReopen: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [confirming, setConfirming] = useState<"settle" | "reopen" | null>(null);
   const settled = period.status === "settled";
 
@@ -48,6 +50,20 @@ export function TransferSummary({
       setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
+    }
+  }
+
+  /**
+   * F6: copies the page URL so it can be sent to other members to bring them
+   * directly to this settled expense period page. Shown on settled pages only.
+   */
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2000);
+    } catch {
+      setLinkCopied(false);
     }
   }
 
@@ -105,6 +121,17 @@ export function TransferSummary({
           {copied ? <Check className="mr-2 h-4 w-4" /> : <Copy className="mr-2 h-4 w-4" />}
           {copied ? "Copied" : "Copy all"}
         </Button>
+
+        {settled ? (
+          <Button variant="outline" size="sm" onClick={copyLink}>
+            {linkCopied ? (
+              <Check className="mr-2 h-4 w-4" />
+            ) : (
+              <Link2 className="mr-2 h-4 w-4" />
+            )}
+            {linkCopied ? "Copied" : "Copy link"}
+          </Button>
+        ) : null}
 
         {settled ? (
           <Button size="sm" onClick={() => setConfirming("reopen")}>

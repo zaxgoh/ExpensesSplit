@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { format } from "date-fns";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { PeriodTable } from "@/components/periods/PeriodTable";
 import { PeriodView } from "@/components/periods/PeriodView";
@@ -304,6 +305,79 @@ describe("checklist: expenses", () => {
       "Amount",
       "Actions",
     ]);
+  });
+
+  it("names the fronting member in the Prepaid column", async () => {
+    const [alex, sam] = await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({
+      name: "September",
+      startDate: "2026-09-01",
+      endDate: "2026-09-30",
+    });
+    await localRepository.createExpense({
+      periodId: period.id,
+      date: "2026-09-10",
+      name: "Groceries",
+      description: "",
+      amountMinor: 9000,
+      isPrePaid: true,
+      paidBy: sam,
+      categoryId: "other",
+      splitMode: "equal",
+      participants: [alex, sam],
+      splitEntries: [],
+      sharesMinor: { [alex]: 4500, [sam]: 4500 },
+      excluded: false,
+    });
+    await localRepository.createExpense({
+      periodId: period.id,
+      date: "2026-09-11",
+      name: "Electricity",
+      description: "",
+      amountMinor: 10000,
+      isPrePaid: false,
+      paidBy: null,
+      categoryId: "other",
+      splitMode: "equal",
+      participants: [alex, sam],
+      splitEntries: [],
+      sharesMinor: { [alex]: 5000, [sam]: 5000 },
+      excluded: false,
+    });
+
+    mount(<PeriodView periodId={period.id} />);
+    await waitFor(() => expect(screen.getByText(/yes — sam/i)).toBeInTheDocument());
+    expect(screen.getByText(/from account/i)).toBeInTheDocument();
+  });
+
+  it("shows Removed member for a fronting member removed since", async () => {
+    const [alex, sam] = await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({
+      name: "September",
+      startDate: "2026-09-01",
+      endDate: "2026-09-30",
+    });
+    await localRepository.createExpense({
+      periodId: period.id,
+      date: "2026-09-10",
+      name: "Groceries",
+      description: "",
+      amountMinor: 9000,
+      isPrePaid: true,
+      paidBy: sam,
+      categoryId: "other",
+      splitMode: "equal",
+      participants: [alex, sam],
+      splitEntries: [],
+      sharesMinor: { [alex]: 4500, [sam]: 4500 },
+      excluded: false,
+    });
+    await localRepository.archiveMember(sam);
+
+    mount(<PeriodView periodId={period.id} />);
+    await waitFor(() =>
+      expect(screen.getByText(/yes — removed member/i)).toBeInTheDocument(),
+    );
   });
 
   it("sorts by date, name and amount, ascending then descending", async () => {
@@ -816,7 +890,7 @@ describe("checklist: expenses", () => {
     expect(await localRepository.listExpenses(period.id)).toHaveLength(1);
   });
 
-  it("hides the add control and shows a read-only notice in a settled period", async () => {
+  it("shows the settled layout with no tabs: amounts on top, expenses below", async () => {
     await seedHousehold(["Alex", "Sam"]);
     const period = await createPeriod({ name: "September" });
     await localRepository.updatePeriod(period.id, { status: "settled", settledAt: Date.now() });
@@ -827,10 +901,159 @@ describe("checklist: expenses", () => {
       </HouseholdProvider>,
     );
 
+    // Settled amounts section renders directly — no tabs to click through.
     await waitFor(() =>
-      expect(screen.getByText(/this period is settled and read-only/i)).toBeInTheDocument(),
+      expect(screen.getByText(/household account/i)).toBeInTheDocument(),
     );
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    // The expense table follows under its own heading.
+    expect(screen.getByRole("heading", { name: /^expenses$/i })).toBeInTheDocument();
+    expect(screen.getByText("No expenses in this period")).toBeInTheDocument();
+    // A settled period with nothing to add shows no "Add one" hint.
+    expect(screen.queryByText(/add one to see how it splits/i)).not.toBeInTheDocument();
+    // Copy link sits beside Copy all on settled pages only.
+    expect(screen.getByRole("button", { name: /copy link/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add expense/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /reopen period/i })).toBeInTheDocument();
+    // Reopen lives in the page header and on the settlement card.
+    expect(screen.getAllByRole("button", { name: /reopen period/i })).toHaveLength(2);
+  });
+
+  it("keeps the tabbed layout and no copy link while in progress", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({ name: "September" });
+
+    mount(<PeriodView periodId={period.id} />);
+
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /expenses/i })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("tab", { name: /settlement/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /copy link/i })).not.toBeInTheDocument();
+  });
+
+  it("copies the page URL from the copy link button on a settled period", async () => {
+    // jsdom ships no clipboard, and its Navigator instance does not accept
+    // an own clipboard property — so the whole global is stubbed with a
+    // wrapper that keeps the real navigator on its prototype chain.
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal(
+      "navigator",
+      Object.create(globalThis.navigator, {
+        clipboard: { value: { writeText }, configurable: true },
+      }),
+    );
+    try {
+      await seedHousehold(["Alex", "Sam"]);
+      const period = await createPeriod({ name: "September" });
+      await localRepository.updatePeriod(period.id, {
+        status: "settled",
+        settledAt: Date.now(),
+      });
+
+      // Note: no userEvent.setup() here — user-event installs its own
+      // navigator.clipboard fake at setup, which would shadow the stub below.
+      render(
+        <HouseholdProvider repository={localRepository}>
+          <PeriodView periodId={period.id} />
+        </HouseholdProvider>,
+      );
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: /copy link/i })).toBeInTheDocument(),
+      );
+      fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
+      expect(
+        await screen.findByRole("button", { name: /^copied$/i }),
+      ).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Checklist: opening a period from the home table (create → open flow)
+// ---------------------------------------------------------------------------
+
+describe("checklist: opening a period from the home table", () => {
+  it("opens a period created moments ago with an empty expense table", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    const user = userEvent.setup();
+
+    // The create dialog is code-split; load its module up front so
+    // the lazy component resolves the moment it opens instead of
+    // racing the first cold transform of the calendar's dependency
+    // graph.
+    await import("@/components/periods/CreatePeriodDialog");
+
+    // The provider stays mounted while the app navigates from the home
+    // table to a period page, so both render under one provider here.
+    const view = render(
+      <HouseholdProvider repository={localRepository}>
+        <PeriodTable />
+      </HouseholdProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByText("No expense periods yet")).toBeInTheDocument(),
+    );
+
+    // Create a period through the dialog the way a user would. The
+    // dialog is code-split, so its fields are awaited; the calendar
+    // opens on the current month, so its days need no navigating; and
+    // day buttons are labelled with the "PPPP" format, which begins
+    // with the weekday, so the day is matched by its "Month Do, YYYY"
+    // part. The first and last day of the month are never "today",
+    // whose label is prefixed with "Today, ".
+    const now = new Date();
+    const first = new Date(now.getFullYear(), now.getMonth(), 1);
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const startDay = new RegExp(format(first, "MMMM do, yyyy"), "i");
+    const endDay = new RegExp(format(last, "MMMM do, yyyy"), "i");
+
+    await user.click(screen.getByRole("button", { name: /create expense period/i }));
+    await user.type(await screen.findByLabelText(/^name/i), "Camping trip");
+
+    await user.click(await screen.findByLabelText(/^start date/i));
+    const startGrid = await screen.findByRole("grid");
+    await user.click(within(startGrid).getByRole("button", { name: startDay }));
+    // The popover unmounts as soon as a day is chosen.
+    await waitFor(() =>
+      expect(screen.queryByRole("grid")).not.toBeInTheDocument(),
+    );
+
+    await user.click(await screen.findByLabelText(/^end date/i));
+    const endGrid = await screen.findByRole("grid");
+    await user.click(within(endGrid).getByRole("button", { name: endDay }));
+    await waitFor(() =>
+      expect(screen.queryByRole("grid")).not.toBeInTheDocument(),
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^ok$/i }));
+
+    // The new row is on the home table.
+    await waitFor(() =>
+      expect(screen.getByText("Camping trip")).toBeInTheDocument(),
+    );
+
+    // Navigate to the period page: it mounts under the same provider.
+    const [created] = await localRepository.listPeriods();
+    view.rerender(
+      <HouseholdProvider repository={localRepository}>
+        <PeriodTable />
+        <PeriodView periodId={created.id} />
+      </HouseholdProvider>,
+    );
+
+    // A brand-new period has no expenses: the page shows the period,
+    // the expense table's empty state, and the add-expense button —
+    // never a "could not be found" error.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /add expense/i }),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByText("No expenses in this period")).toBeInTheDocument();
+    expect(screen.queryByText(/could not be found/i)).not.toBeInTheDocument();
   });
 });

@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { formatMoney } from "@/lib/money/minorUnits";
-import type { Expense } from "@/types";
+import type { Expense, Member } from "@/types";
 
 const MODE_LABEL: Record<string, string> = {
   equal: "Equal",
@@ -81,6 +81,7 @@ function SortButton({
 /** F4: the expense table for one period. Read-only when the period is settled. */
 export function ExpenseTable({
   expenses,
+  members,
   sort,
   onSortChange,
   onEdit,
@@ -88,6 +89,8 @@ export function ExpenseTable({
   readOnly,
 }: {
   expenses: Expense[];
+  /** Needed to name the fronting member in the Prepaid column. */
+  members: Member[];
   sort: ExpenseSort;
   onSortChange: (sort: ExpenseSort) => void;
   onEdit: (expense: Expense) => void;
@@ -131,9 +134,12 @@ export function ExpenseTable({
             <TableRow>
               <TableCell colSpan={7} className="h-28 text-center">
                 <p className="font-medium">No expenses in this period</p>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Add one to see how it splits.
-                </p>
+                {/* A settled period has nothing to add, so the hint is dropped. */}
+                {readOnly ? null : (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Add one to see how it splits.
+                  </p>
+                )}
               </TableCell>
             </TableRow>
           ) : (
@@ -158,7 +164,15 @@ export function ExpenseTable({
                 </TableCell>
                 <TableCell>
                   {expense.isPrePaid ? (
-                    <span className="text-positive">Yes</span>
+                    <span className="text-positive">
+                      Yes —{" "}
+                      {(() => {
+                        const fronting = members.find((m) => m.id === expense.paidBy);
+                        return fronting && !fronting.archived
+                          ? fronting.name
+                          : "Removed member";
+                      })()}
+                    </span>
                   ) : (
                     <span className="text-muted-foreground">
                       No <span className="text-xs">(from account)</span>

@@ -84,7 +84,7 @@ export async function ensureSignedIn(): Promise<string> {
 
 /**
  * Storage keys from §7. The household id is the anonymous uid, cached so the
- * first paint can route to `/setup` before Auth has resolved.
+ * first paint can open the first-run setup dialog before Auth has resolved.
  *
  * The join secret is deliberately NOT sent to Firestore in v1: there is no
  * share link yet, and writing a bearer secret server-side would put it behind

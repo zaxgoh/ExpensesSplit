@@ -225,57 +225,14 @@ export function PeriodView({ periodId }: { periodId: string }) {
         </div>
       </div>
 
-      {settled ? (
-        <p className="rounded-lg border border-positive/40 bg-positive/10 p-3 text-sm">
-          This period is settled and read-only. Reopen it to make changes.
-        </p>
-      ) : null}
-
       {actionError ? (
         <p role="alert" className="rounded-lg border border-negative/40 bg-negative/10 p-3 text-sm">
           {actionError}
         </p>
       ) : null}
 
-      <Tabs defaultValue="expenses">
-        <TabsList aria-label="Period sections">
-          <TabsTrigger value="expenses">Expenses</TabsTrigger>
-          <TabsTrigger value="settlement">Settlement</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="expenses" className="mt-4">
-          {formOpen ? (
-            <div className="mb-4 rounded-lg border p-4">
-              <h2 className="mb-3 text-lg font-medium">
-                {editing ? "Edit expense" : "Add expense"}
-              </h2>
-              <AddExpenseForm
-                period={period}
-                members={members}
-                initial={editing}
-                onSubmit={handleSubmit}
-                onCancel={() => {
-                  setFormOpen(false);
-                  setEditing(null);
-                }}
-              />
-            </div>
-          ) : null}
-
-          <ExpenseTable
-            expenses={expenses}
-            sort={sort}
-            onSortChange={setSort}
-            onEdit={(expense) => {
-              setEditing(expense);
-              setFormOpen(true);
-            }}
-            onDelete={(expense) => setDeletingExpense(expense)}
-            readOnly={settled}
-          />
-        </TabsContent>
-
-        <TabsContent value="settlement" className="mt-4">
+      {settled ? (
+        <div className="grid gap-6">
           {totals ? (
             <TransferSummary
               period={period}
@@ -285,8 +242,76 @@ export function PeriodView({ periodId }: { periodId: string }) {
               onReopen={() => void setStatus("in_progress")}
             />
           ) : null}
-        </TabsContent>
-      </Tabs>
+
+          <section className="grid gap-3">
+            <h2 className="text-lg font-medium">Expenses</h2>
+            <ExpenseTable
+              expenses={expenses}
+              members={members}
+              sort={sort}
+              onSortChange={setSort}
+              onEdit={(expense) => {
+                setEditing(expense);
+                setFormOpen(true);
+              }}
+              onDelete={(expense) => setDeletingExpense(expense)}
+              readOnly
+            />
+          </section>
+        </div>
+      ) : (
+        <Tabs defaultValue="expenses">
+          <TabsList aria-label="Period sections">
+            <TabsTrigger value="expenses">Expenses</TabsTrigger>
+            <TabsTrigger value="settlement">Settlement</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="expenses" className="mt-4">
+            {formOpen ? (
+              <div className="mb-4 rounded-lg border p-4">
+                <h2 className="mb-3 text-lg font-medium">
+                  {editing ? "Edit expense" : "Add expense"}
+                </h2>
+                <AddExpenseForm
+                  period={period}
+                  members={members}
+                  initial={editing}
+                  onSubmit={handleSubmit}
+                  onCancel={() => {
+                    setFormOpen(false);
+                    setEditing(null);
+                  }}
+                />
+              </div>
+            ) : null}
+
+            <ExpenseTable
+              expenses={expenses}
+              members={members}
+              sort={sort}
+              onSortChange={setSort}
+              onEdit={(expense) => {
+                setEditing(expense);
+                setFormOpen(true);
+              }}
+              onDelete={(expense) => setDeletingExpense(expense)}
+              readOnly={settled}
+            />
+          </TabsContent>
+
+          <TabsContent value="settlement" className="mt-4">
+            {totals ? (
+              <TransferSummary
+                period={period}
+                totals={totals}
+                members={members}
+                onSettle={() => void setStatus("settled")}
+                onReopen={() => void setStatus("in_progress")}
+              />
+            ) : null}
+          </TabsContent>
+        </Tabs>
+      )}
 
       {totals ? <InvariantProbe totals={totals} /> : null}
 

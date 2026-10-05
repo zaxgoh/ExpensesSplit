@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { format, parseISO } from "date-fns";
 import { Plus, Trash2 } from "lucide-react";
@@ -27,20 +27,21 @@ import type { ExpensePeriod, ISODate, StatusFilter as StatusFilterValue } from "
  * state, with the create button still visible in the header.
  */
 export function PeriodTable() {
-  const { repository, ready } = useHousehold();
-  const [periods, setPeriods] = useState<ExpensePeriod[]>([]);
+  const { repository, ready, periods, reloadPeriods } = useHousehold();
   const [filter, setFilter] = useState<StatusFilterValue>("all");
   const [descending, setDescending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState<ExpensePeriod | null>(null);
 
-  const reload = useCallback(async () => {
-    setPeriods(await repository.listPeriods());
-  }, [repository]);
-
+  // The provider owns the period list (PLAN.md §5, client
+  // state); this table renders it rather than keeping its own
+  // copy. The localStorage repository pushes nothing, so a
+  // write is followed by an explicit re-read — which is also
+  // what keeps a period page opened from this table, mounted
+  // on the same provider, in sync.
   useEffect(() => {
-    if (ready) void reload();
-  }, [ready, reload]);
+    if (ready) void reloadPeriods();
+  }, [ready, reloadPeriods]);
 
   const visible = useMemo(() => {
     const filtered = filter === "all" ? periods : periods.filter((p) => p.status === filter);
@@ -52,13 +53,13 @@ export function PeriodTable() {
 
   async function handleCreate(input: { name: string; startDate: ISODate; endDate: ISODate }) {
     await repository.createPeriod(input);
-    await reload();
+    await reloadPeriods();
   }
 
   async function handleDelete(period: ExpensePeriod) {
     await repository.deletePeriod(period.id);
     setDeleting(null);
-    await reload();
+    await reloadPeriods();
   }
 
   return (
