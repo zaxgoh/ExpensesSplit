@@ -419,9 +419,9 @@ their name as "Removed member"; a float amount with more than two decimals (reje
 | Route | Purpose |
 |---|---|
 | `/` | Home: the expense period table, with status filter and create button |
-| `/period/[periodId]` | One period: its expense table, add-expense form, settlement summary, settle/reopen, delete |
+| `/period/[periodId]` | One period: its expense table, add-expense form, settlement summary, settle/reopen |
 | `/setup` | First run only: household name, then add members |
-| `/share` | Deferred: explains how to reach this household from another device (Phase 2) |
+| `/share` | Explains how to reach this household from another device |
 
 ### F1 — first run
 
