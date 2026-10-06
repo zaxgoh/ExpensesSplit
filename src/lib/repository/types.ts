@@ -50,9 +50,10 @@ export type Repository = {
   /**
    * View-only share links (§7). Tokens are bearer secrets: `resolveShareLink`
    * needs no household context because the token document carries the
-   * household id. Links never expire; deleting one revokes it.
+   * household id. Links never expire; deleting one revokes it. `periodId`
+   * pins the landing page to the period the link was created from.
    */
-  createShareLink(): Promise<ShareLink>;
+  createShareLink(periodId: string | null): Promise<ShareLink>;
   listShareLinks(): Promise<ShareLink[]>;
   resolveShareLink(token: string): Promise<ShareLink | null>;
   deleteShareLink(token: string): Promise<void>;

@@ -22,7 +22,12 @@ export function SharedShell({
   children,
 }: {
   token: string;
-  children: React.ReactNode;
+  /**
+   * Either static content or a function of the resolved link, so the token
+   * route can land directly on the linked period while the list routes render
+   * the same home for every token.
+   */
+  children: React.ReactNode | ((link: ShareLink) => React.ReactNode);
 }) {
   const [link, setLink] = useState<ShareLink | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -80,10 +85,15 @@ export function SharedShell({
   }
 
   return (
-    <HouseholdProvider repository={repository} readOnly basePath={`/share/${token}`}>
+    <HouseholdProvider
+      repository={repository}
+      readOnly
+      basePath={`/share/${token}`}
+      homePath={`/share/${token}/periods`}
+    >
       <div className="grid gap-6">
         <ViewOnlyBanner />
-        {children}
+        {typeof children === "function" ? children(link) : children}
       </div>
     </HouseholdProvider>
   );

@@ -64,20 +64,22 @@ describe("share links", () => {
   it("creates, resolves, lists newest-first, and revokes links", async () => {
     await seedHousehold(["Alex", "Sam"]);
     const hid = (await localRepository.getHousehold())!.id;
+    const period = await createPeriod({ name: "September" });
 
     expect(await localRepository.listShareLinks()).toHaveLength(0);
 
-    const first = await localRepository.createShareLink();
+    const first = await localRepository.createShareLink(period.id);
     expect(first.token.length).toBeGreaterThan(16);
     expect(first.householdId).toBe(hid);
-    expect(first.token).not.toBe((await localRepository.createShareLink()).token);
+    expect(first.periodId).toBe(period.id);
+    expect(first.token).not.toBe((await localRepository.createShareLink(null)).token);
 
     const listed = await localRepository.listShareLinks();
     expect(listed).toHaveLength(2);
     expect(listed[0]!.createdAt).toBeGreaterThanOrEqual(listed[1]!.createdAt);
 
     expect(await localRepository.resolveShareLink(first.token)).toEqual(
-      expect.objectContaining({ token: first.token }),
+      expect.objectContaining({ token: first.token, periodId: period.id }),
     );
     expect(await localRepository.resolveShareLink("no-such-token")).toBeNull();
 
@@ -172,7 +174,12 @@ describe("share links", () => {
     await localRepository.updatePeriod(period.id, { status: "settled", settledAt: Date.now() });
 
     render(
-      <HouseholdProvider repository={localRepository} readOnly basePath="/share/tok">
+      <HouseholdProvider
+        repository={localRepository}
+        readOnly
+        basePath="/share/tok"
+        homePath="/share/tok/periods"
+      >
         <PeriodView periodId={period.id} />
       </HouseholdProvider>,
     );
@@ -183,9 +190,59 @@ describe("share links", () => {
     for (const button of screen.getAllByRole("button", { name: /reopen period/i })) {
       expect(button).toBeDisabled();
     }
-    // The back link returns to the shared home, not the owner's.
+    // The back link returns to the shared list, not the owner's.
     expect(screen.getByRole("link", { name: /all expense periods/i }).getAttribute("href")).toBe(
-      "/share/tok",
+      "/share/tok/periods",
+    );
+  });
+
+  it("lands directly on the linked period, showing its transfers", async () => {
+    const [alex, sam] = await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({ name: "September" });
+    await localRepository.createExpense({
+      periodId: period.id,
+      date: "2026-01-15",
+      name: "Groceries",
+      description: "",
+      amountMinor: 9000,
+      isPrePaid: false,
+      paidBy: null,
+      categoryId: "other",
+      splitMode: "equal",
+      participants: [alex!, sam!],
+      splitEntries: [],
+      sharesMinor: { [alex!]: 4500, [sam!]: 4500 },
+      excluded: false,
+    });
+    await localRepository.updatePeriod(period.id, { status: "settled", settledAt: Date.now() });
+    const hid = (await localRepository.getHousehold())!.id;
+    resolveShareLink.mockResolvedValue({
+      token: "live-token",
+      householdId: hid,
+      periodId: period.id,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    createSharedRepository.mockReturnValue(localRepository);
+
+    render(
+      <SharedShell token="live-token">
+        {(link) =>
+          link.periodId ? (
+            <PeriodView periodId={link.periodId} />
+          ) : (
+            <p>shared list</p>
+          )
+        }
+      </SharedShell>,
+    );
+
+    // The settled period renders directly: transfers on top, no tabs, no list.
+    expect(await screen.findByText(/household account/i)).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+    expect(screen.queryByText("shared list")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /all expense periods/i }).getAttribute("href")).toBe(
+      "/share/live-token/periods",
     );
   });
 
@@ -225,7 +282,7 @@ describe("share links", () => {
     // The banner names the mode, and the household renders greyed out.
     expect(await screen.findByText(/read-only copy/i)).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: /expense periods for test household/i }),
+      await screen.findByRole("heading", { name: /expense periods for test household/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /create expense period/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^add member$/i })).toBeDisabled();

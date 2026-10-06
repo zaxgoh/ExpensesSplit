@@ -327,21 +327,26 @@ service cloud.firestore {
     // View-only share links (§7). The token is the document id — a 128-bit
     // bearer secret — and resolution needs no household context, which is
     // what lets another device turn `/share/{token}` into a household.
-    // Anyone signed in can resolve a token they hold; only members create
-    // and revoke. Links never expire, so updates are refused outright and
-    // revocation is a delete. Listing is denied so tokens cannot be
-    // enumerated.
+    // Anyone signed in can resolve a token they hold; only members create,
+    // list, and revoke. Links never expire, so updates are refused outright
+    // and revocation is a delete. Listing is authorised per document against
+    // that document's household, so a member's `householdId == own` query
+    // passes while enumeration of other households' tokens is denied.
 
     match /shareLinks/{token} {
       function validShareLink() {
         return request.resource.data.householdId is string
           && request.resource.data.householdId.size() > 0
-          && request.resource.data.keys().hasOnly(['householdId', 'createdAt'])
+          && (request.resource.data.periodId == null
+              || (request.resource.data.periodId is string
+                  && request.resource.data.periodId.size() > 0
+                  && exists(/databases/$(database)/documents/households/$(request.resource.data.householdId)/periods/$(request.resource.data.periodId))))
+          && request.resource.data.keys().hasOnly(['householdId', 'periodId', 'createdAt', 'updatedAt'])
           && request.resource.data.createdAt == request.time;
       }
 
       allow get: if isSignedIn();
-      allow list: if false;
+      allow list: if isMember(resource.data.householdId);
       allow create: if validShareLink() && isMember(request.resource.data.householdId);
       allow update: if false;
       allow delete: if isMember(resource.data.householdId);

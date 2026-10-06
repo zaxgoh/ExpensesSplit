@@ -973,10 +973,11 @@ describe("checklist: expenses", () => {
       const copyButton = await screen.findByRole("button", { name: /copy share link/i });
       await waitFor(() => expect(copyButton).toHaveTextContent("Copied"));
 
-      // The link resolves back to this household.
+      // The link resolves back to this household, pinned to this period.
       const token = url.slice(url.lastIndexOf("/") + 1);
       const resolved = await localRepository.resolveShareLink(token);
       expect(resolved?.householdId).toBe((await localRepository.getHousehold())?.id);
+      expect(resolved?.periodId).toBe(period.id);
     } finally {
       vi.unstubAllGlobals();
     }

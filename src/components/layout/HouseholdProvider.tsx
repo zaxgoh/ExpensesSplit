@@ -36,6 +36,12 @@ type HouseholdContextValue = {
    * page passes `/share/{token}` so navigation stays inside the shared view.
    */
   basePath: string;
+  /**
+   * Where the period page's "All expense periods" back link goes. The owner
+   * root (`/`); a share page passes its list route so a visitor landing
+   * directly on a period can still reach the other periods.
+   */
+  homePath: string;
   reloadMembers: () => Promise<void>;
   reloadPeriods: () => Promise<void>;
   setHousehold: (household: Household) => void;
@@ -54,11 +60,13 @@ export function HouseholdProvider({
   repository = firestoreRepository,
   readOnly = false,
   basePath = "",
+  homePath = "/",
 }: {
   children: ReactNode;
   repository?: Repository;
   readOnly?: boolean;
   basePath?: string;
+  homePath?: string;
 }) {
   const [household, setHousehold] = useState<Household | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -119,6 +127,7 @@ export function HouseholdProvider({
       ready: status !== "loading",
       readOnly,
       basePath,
+      homePath,
       reloadMembers,
       reloadPeriods,
       setHousehold,
@@ -133,6 +142,7 @@ export function HouseholdProvider({
       error,
       readOnly,
       basePath,
+      homePath,
       reloadMembers,
       reloadPeriods,
     ],

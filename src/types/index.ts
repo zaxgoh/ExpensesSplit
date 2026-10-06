@@ -95,11 +95,14 @@ export type Category = {
  * A view-only share link (§7). The token is a 128-bit base64url bearer secret
  * and the document id: the share URL is `/share/{token}` and carries no
  * household id, which the token document resolves. Links never expire;
- * deleting the document revokes the link.
+ * deleting the document revokes the link. `periodId` is the period the link
+ * was created from — the visitor lands directly on it; null (old links)
+ * lands on the shared period list instead.
  */
 export type ShareLink = {
   token: string;
   householdId: string;
+  periodId: string | null;
   createdAt: number;
   updatedAt: number;
 };

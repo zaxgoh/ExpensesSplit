@@ -59,8 +59,12 @@ function write(key: string, value: unknown): void {
   }
 }
 
-function uid(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+/** Links written before `periodId` existed land on the list (null). */
+function normalizeShareLink(link: ShareLink): ShareLink {
+  return { ...link, periodId: link.periodId ?? null };
+}
+
+function uid(): string {  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `id-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
@@ -97,7 +101,6 @@ function assertOpen(period: ExpensePeriod | undefined, action: string): ExpenseP
 function allExpenses(): Expense[] {
   return read<Expense[]>(KEYS.expenses, []);
 }
-
 function saveExpenses(expenses: Expense[]): void {
   write(KEYS.expenses, expenses);
 }
@@ -296,13 +299,14 @@ export const localRepository: Repository = {
 
   // -------------------------------------------------------------- share links
 
-  async createShareLink() {
+  async createShareLink(periodId: string | null) {
     const household = read<Household | null>(KEYS.household, null);
     if (!household) throw new Error("Create a household before sharing it.");
     const now = Date.now();
     const link: ShareLink = {
       token: newToken(),
       householdId: household.id,
+      periodId,
       createdAt: now,
       updatedAt: now,
     };
@@ -313,11 +317,14 @@ export const localRepository: Repository = {
   },
 
   async listShareLinks() {
-    return [...read<ShareLink[]>(KEYS.shareLinks, [])].sort((a, b) => b.createdAt - a.createdAt);
+    return [...read<ShareLink[]>(KEYS.shareLinks, [])]
+      .map(normalizeShareLink)
+      .sort((a, b) => b.createdAt - a.createdAt);
   },
 
   async resolveShareLink(token) {
-    return read<ShareLink[]>(KEYS.shareLinks, []).find((link) => link.token === token) ?? null;
+    const found = read<ShareLink[]>(KEYS.shareLinks, []).find((link) => link.token === token);
+    return found ? normalizeShareLink(found) : null;
   },
 
   async deleteShareLink(token) {

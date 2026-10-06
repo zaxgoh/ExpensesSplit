@@ -36,7 +36,7 @@ import type { Expense, SplitEntry } from "@/types";
 
 /** F4, F5, F6: one expense period — its expenses, the add form, and settlement. */
 export function PeriodView({ periodId }: { periodId: string }) {
-  const { repository, members, periods, ready, reloadPeriods, readOnly, basePath } =
+  const { repository, members, periods, ready, reloadPeriods, readOnly, homePath } =
     useHousehold();
   const router = useRouter();
 
@@ -174,7 +174,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
-            href={basePath || "/"}
+            href={homePath}
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -242,7 +242,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
         </div>
       </div>
 
-      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
+      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} periodId={period.id} />
 
       {actionError ? (
         <p role="alert" className="rounded-lg border border-negative/40 bg-negative/10 p-3 text-sm">

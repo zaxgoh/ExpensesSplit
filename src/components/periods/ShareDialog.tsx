@@ -24,9 +24,12 @@ import type { ShareLink } from "@/types";
 export function ShareDialog({
   open,
   onOpenChange,
+  periodId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The period the link is created from — the visitor lands directly on it. */
+  periodId: string;
 }) {
   const { repository } = useHousehold();
   const [links, setLinks] = useState<ShareLink[]>([]);
@@ -54,9 +57,11 @@ export function ShareDialog({
     setBusy(true);
     setError(null);
     try {
-      const link = await repository.createShareLink();
-      await refresh();
+      const link = await repository.createShareLink(periodId);
+      // Copy first: the link exists even if the list refresh below fails,
+      // and the URL must reach the clipboard regardless.
       await copy(link.token);
+      await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create the link.");
     } finally {
@@ -93,9 +98,9 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>Share view-only link</DialogTitle>
           <DialogDescription>
-            Anyone with the link can open this household and browse every expense
-            period, on any device. They cannot add, edit, or delete anything.
-            Links never expire — revoke one to cut off access.
+            Anyone with the link lands directly on this period and can browse the
+            whole household from there, on any device. They cannot add, edit, or
+            delete anything. Links never expire — revoke one to cut off access.
           </DialogDescription>
         </DialogHeader>
 

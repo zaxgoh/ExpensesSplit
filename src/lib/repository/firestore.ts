@@ -214,6 +214,7 @@ function shareLinkFromSnap(
   return {
     token,
     householdId: data.householdId,
+    periodId: data.periodId ?? null,
     createdAt: toMillis(data.createdAt),
     updatedAt: toMillis(data.updatedAt),
   };
@@ -667,12 +668,12 @@ export function createFirestoreRepository(options?: {
     // stay member-only, so a share visitor is read-only by rules, not just
     // by hidden buttons.
 
-    async createShareLink() {
+    async createShareLink(periodId: string | null) {
       const hid = await resolveHid();
       const token = newJoinSecret();
       const now = Date.now();
-      await createDoc(getDb(), shareLinkDoc(token), { householdId: hid });
-      return { token, householdId: hid, createdAt: now, updatedAt: now };
+      await createDoc(getDb(), shareLinkDoc(token), { householdId: hid, periodId });
+      return { token, householdId: hid, periodId, createdAt: now, updatedAt: now };
     },
 
     async listShareLinks() {
