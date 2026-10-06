@@ -238,7 +238,10 @@ describe("share links", () => {
     );
 
     // The settled period renders directly: transfers on top, no tabs, no list.
-    expect(await screen.findByText(/household account/i)).toBeInTheDocument();
+    // The settlement card is headed with the household name.
+    expect(
+      await screen.findByRole("heading", { name: /test household — september/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     expect(screen.queryByText("shared list")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /all expense periods/i }).getAttribute("href")).toBe(

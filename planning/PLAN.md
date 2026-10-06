@@ -574,7 +574,8 @@ the table. `Cmd/Ctrl+Enter` submits. Validation failures are shown inline next t
 
 ### F6 — settle a period
 
-A **Settlement card** on the period page, headed "Household account — <period name>", containing:
+A **Settlement card** on the period page, headed "{household name} — <period name>" (the name
+given at setup), containing:
 
 - A **funding line** for the account's own requirement, ceiled to whole dollars:
   "The account must cover $X of the $Y spent in this period". This is not a member's debt and must not

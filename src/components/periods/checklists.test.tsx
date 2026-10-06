@@ -907,8 +907,11 @@ describe("checklist: expenses", () => {
     );
 
     // Settled amounts section renders directly — no tabs to click through.
+    // The card is headed with the household name, not "Household account".
     await waitFor(() =>
-      expect(screen.getByText(/household account/i)).toBeInTheDocument(),
+      expect(
+        screen.getByRole("heading", { name: /test household — september/i }),
+      ).toBeInTheDocument(),
     );
     expect(screen.queryByRole("tab")).not.toBeInTheDocument();
     // The expense table follows under its own heading.

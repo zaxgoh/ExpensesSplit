@@ -29,7 +29,7 @@ export function TransferSummary({
 }) {
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState<"settle" | "reopen" | null>(null);
-  const { readOnly } = useHousehold();
+  const { household, readOnly } = useHousehold();
   const settled = period.status === "settled";
 
   const nonZero = totals.transfers.filter((t) => t.toAccountExact !== 0);
@@ -58,7 +58,9 @@ export function TransferSummary({
   return (
     <section className="grid gap-4 rounded-lg border p-4">
       <header>
-        <h2 className="text-lg font-medium">Household account — {period.name}</h2>
+        <h2 className="text-lg font-medium">
+          {household?.name ?? "Household account"} — {period.name}
+        </h2>
         <p className="text-sm text-muted-foreground">
           Members transfer into the account. They never pay each other.
         </p>
