@@ -9,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { localRepository } from "@/lib/repository/local";
+import { firestoreRepository } from "@/lib/repository/firestore";
 import type { Repository } from "@/lib/repository/types";
 import type { Category, ExpensePeriod, Household, Member } from "@/types";
 
@@ -40,7 +40,7 @@ const HouseholdContext = createContext<HouseholdContextValue | null>(null);
  */
 export function HouseholdProvider({
   children,
-  repository = localRepository,
+  repository = firestoreRepository,
 }: {
   children: ReactNode;
   repository?: Repository;
