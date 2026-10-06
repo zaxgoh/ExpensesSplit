@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Share2, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 import { StatusBadge } from "@/components/periods/StatusBadge";
 import { InlinePeriodName } from "@/components/periods/InlinePeriodName";
 import { ConfirmDeleteDialog } from "@/components/periods/ConfirmDeleteDialog";
+import { ShareDialog } from "@/components/periods/ShareDialog";
 import { TransferSummary } from "@/components/settlement/TransferSummary";
 import { useHousehold } from "@/components/layout/HouseholdProvider";
 import { formatMoney } from "@/lib/money/minorUnits";
@@ -35,7 +36,8 @@ import type { Expense, SplitEntry } from "@/types";
 
 /** F4, F5, F6: one expense period — its expenses, the add form, and settlement. */
 export function PeriodView({ periodId }: { periodId: string }) {
-  const { repository, members, periods, ready, reloadPeriods } = useHousehold();
+  const { repository, members, periods, ready, reloadPeriods, readOnly, basePath } =
+    useHousehold();
   const router = useRouter();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -44,6 +46,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
   const [sort, setSort] = useState<ExpenseSort>({ key: "date", direction: "asc" });
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [deletingPeriod, setDeletingPeriod] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const period = useMemo(
@@ -171,7 +174,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Link
-            href="/"
+            href={basePath || "/"}
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden />
@@ -181,7 +184,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
             <InlinePeriodName
               name={period.name}
               existingNames={siblingNames}
-              disabled={settled}
+              disabled={settled || readOnly}
               onRename={renamePeriod}
             />
             <StatusBadge status={period.status} />
@@ -195,8 +198,19 @@ export function PeriodView({ periodId }: { periodId: string }) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {readOnly ? null : (
+            <Button variant="outline" onClick={() => setShareOpen(true)}>
+              <Share2 className="mr-2 h-4 w-4" aria-hidden />
+              Share
+            </Button>
+          )}
           {settled ? (
-            <Button variant="outline" onClick={() => void setStatus("in_progress")}>
+            <Button
+              variant="outline"
+              onClick={() => void setStatus("in_progress")}
+              disabled={readOnly}
+              title={readOnly ? "View-only link — reopening is disabled" : undefined}
+            >
               Reopen period
             </Button>
           ) : (
@@ -205,6 +219,8 @@ export function PeriodView({ periodId }: { periodId: string }) {
                 setEditing(null);
                 setFormOpen(true);
               }}
+              disabled={readOnly}
+              title={readOnly ? "View-only link — adding expenses is disabled" : undefined}
             >
               <Plus className="mr-2 h-4 w-4" aria-hidden />
               Add expense
@@ -217,13 +233,16 @@ export function PeriodView({ periodId }: { periodId: string }) {
             // F8: delete controls are hidden while a period is settled, and the
             // Firestore rules enforce the same thing — a settled period's
             // expenses cannot be deleted, so its cascade delete cannot run.
-            disabled={settled}
+            disabled={settled || readOnly}
+            title={readOnly ? "View-only link — deleting is disabled" : undefined}
           >
             <Trash2 className="mr-2 h-4 w-4" aria-hidden />
             Delete period
           </Button>
         </div>
       </div>
+
+      <ShareDialog open={shareOpen} onOpenChange={setShareOpen} />
 
       {actionError ? (
         <p role="alert" className="rounded-lg border border-negative/40 bg-negative/10 p-3 text-sm">
@@ -295,7 +314,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
                 setFormOpen(true);
               }}
               onDelete={(expense) => setDeletingExpense(expense)}
-              readOnly={settled}
+              readOnly={settled || readOnly}
             />
           </TabsContent>
 

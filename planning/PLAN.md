@@ -136,19 +136,23 @@ src/
     layout.tsx                    # <html>/<body> shell, fonts, HouseholdProvider
     page.tsx                      # home: expense period table + first-run setup dialog
     period/[periodId]/page.tsx    # expenses table + settlement for one period
+    share/[token]/page.tsx       # shared home: period table + household panel, read-only
+    share/[token]/period/[periodId]/page.tsx  # one shared period, read-only
     globals.css
   components/
     ui/            shadcn primitives
     layout/        HouseholdProvider.tsx, DatePicker.tsx, ThemeScript.tsx (+ theme toggle)
     periods/       PeriodTable, CreatePeriodDialog, StatusBadge, StatusFilter,
-                   InlinePeriodName, ConfirmDeleteDialog, PeriodView
+                   InlinePeriodName, ConfirmDeleteDialog, PeriodView, ShareDialog
     expenses/      ExpenseTable, AddExpenseForm
     settlement/    TransferSummary
+    share/         SharedShell (token → read-only provider), ViewOnlyBanner
     members/       HouseholdSetupDialog (first-run modal), AddMemberDialog,
                    MemberList (home member list with inline rename)
   lib/
     repository/    types.ts (the Repository interface), local.ts (localStorage impl)
     firebase/      client.ts, emulator.ts, paths.ts
+    share/         links.ts (share URL builder)
     split/         engine.ts, account.ts       (pure, no React/Firebase)
     money/         minorUnits.ts              (parse/format, ceil/floor whole dollars)
     validation/    schemas.ts
@@ -272,6 +276,7 @@ households/{householdId}/members/{memberId}               name, avatar, colorHex
 households/{householdId}/periods/{periodId}               full ExpensePeriod document
 households/{householdId}/periods/{periodId}/expenses/{eid} full Expense document
 households/{householdId}/meta/categories                  { categories: [{id,label,icon,colorHex}] }
+shareLinks/{token}                                        { householdId, createdAt, updatedAt }
 ```
 
 Expenses live in a subcollection **of the period**, so opening a period is one collection query and
@@ -420,7 +425,8 @@ their name as "Removed member"; a float amount with more than two decimals (reje
 |---|---|
 | `/` | Home: the expense period table, with status filter and create button |
 | `/period/[periodId]` | One period: its expense table, add-expense form, settlement summary, settle/reopen |
-| `/share` | Explains how to reach this household from another device |
+| `/share/[token]` | Shared home: the period table and household panel, read-only (§7) |
+| `/share/[token]/period/[periodId]` | One shared period: expenses and settlement, read-only (§7) |
 
 ### F1 — first run
 
@@ -596,17 +602,16 @@ Expenses/Settlement tabs and renders a single column, top to bottom:
 2. **The expense table** under an "Expenses" heading — the same F4 table, read-only, its
    sortable headers still working. A settled period with zero expenses shows the empty
    state without the "Add one" hint.
-3. **A copy link button** beside Copy all, which copies the page's URL (`window.location.href`)
-   to the clipboard and confirms with a "Copied" label, so the URL can be sent to other
-   members to bring them directly to this settled expense period page. It appears on
-   settled pages only. In Phase 1 the copied URL opens the period on the same device or
-   browser (the data is in localStorage); a link another member can open on their own
-   device arrives with the join-link feature in §7.
 
 The green "settled and read-only" banner is dropped in this layout — the `Settled` badge in
 the header and the restructured page itself carry that information, and the **Reopen period**
-button stays in the header (F6). An `in progress` period keeps the tabbed layout and shows
-no copy link button.
+button stays in the header (F6). An `in progress` period keeps the tabbed layout.
+
+**Sharing.** The page header carries a **Share** button (top, next to Reopen period on a
+settled period and next to Add expense on an in-progress one; owner pages only, every
+status). It opens the share dialog (§7): creating a link copies a `/share/{token}` URL
+that opens the household read-only on any device. There is no per-page URL copy: the
+old "Copy link" button beside Copy all is removed, repurposed into Share.
 
 ### F7 — remove a member
 
@@ -717,9 +722,8 @@ action rather than a selected state, and its only visual difference is a fill.
    per member — with a live preview. The split section is hidden entirely while pre-paid, replaced by
    a reimbursement summary.
 6. **TransferSummary** — the F6 settlement card: funding line, per-member transfer rows, copy-all,
-   Settle / Reopen. On a settled period it also renders the **Copy link** button (copying the page
-   URL) beside Copy all, and it doubles as the settled amounts section at the top of the settled
-   page (F6).
+   Settle / Reopen (disabled on a view-only share page). Sharing is not here: it lives in
+   the period page header (§7), and the old Copy-link button is removed.
 7. **DatePicker** — shadcn `Popover` + `Calendar`. Must use the shadcn `Calendar` wrapper, **not** a
    bare `DayPicker`: the raw component ships with no `classNames`, which renders cramped day cells.
    The caption is `captionLayout="dropdown"`, giving **separate month and year select lists** so a
@@ -730,7 +734,8 @@ action rather than a selected state, and its only visual difference is a fill.
    would drop every user into e.g. January 2020).
 8. **InlinePeriodName** — the period name in the period page header is a button that turns into a
    textbox on click. Saves on Enter or blur, cancels on Escape, and rejects an empty name, a name
-   over 60 characters, or a name another period already uses. Disabled while the period is settled.
+   over 60 characters, or a name another period already uses. Disabled while the period is settled
+   or the page is a view-only share.
 9. **ConfirmDeleteDialog** — deletion is permanent, so every delete asks first and the dialog names
    the collateral ("this also deletes the 12 expenses inside it").
 10. **Toasts** — bottom-centre on mobile, bottom-right on desktop. Reserved for non-destructive
@@ -745,6 +750,14 @@ action rather than a selected state, and its only visual difference is a fill.
     member joins every future split with a zero balance so far.
 13. **MemberList** — the home page member list: one row per member with avatar and name;
     clicking a name edits it inline (Enter/blur saves, Escape cancels, duplicates rejected).
+    On a view-only share page the names render as plain text with no rename affordance.
+14. **ShareDialog** — the §7 share manager (period page header, owner pages only, every status):
+    creates bearer-secret links (copying the `/share/{token}` URL on creation), lists live
+    links with creation dates, and revokes with per-row Copy/Revoke. Links never expire.
+15. **SharedShell + ViewOnlyBanner** — resolves `/share/{token}` to its household and renders
+    the shared home/period inside a read-only household provider (`readOnly`, period links
+    prefixed `/share/{token}`), under a banner naming the mode; unknown/revoked tokens get
+    the invalid-link state instead of data.
 
 ### Guarding the shadcn primitives
 
@@ -764,7 +777,7 @@ optional field defaulting to `other`; it is not a required column of the expense
 
 WCAG 2.1 AA, and part of the definition of done:
 - Full keyboard path through create-period, add-expense, save, settle, reopen, rename (period and
-  member), copy link,
+  member), share dialog,
   delete, and dialog close (`Esc`).
 - The period and expense tables are real `<table>` markup with `<th scope="col">` headers, so column
   association survives; a row is opened via a link/button inside the name cell rather than a click
@@ -815,25 +828,55 @@ other secrets in v1.
 | Key | Value |
 |---|---|
 | `1stsplit:householdId` | household document id |
-| `1stsplit:joinSecret` | 128-bit base64url secret for the share link |
 | `1stsplit:theme` | `dark \| light \| system` |
 | `1stsplit:lastPeriodId` | last opened period, for return-visit UX |
 | `1stsplit:draftExpense` | `sessionStorage`, cleared on save |
 
+Share tokens are **not** kept in storage: they live in the top-level `shareLinks`
+collection in Firestore, so listing and revoking them works from any device and
+there is nothing bearer-secret-shaped in `localStorage` to steal.
+
 If storage is unavailable (private mode), fall back to in-memory and show a non-blocking banner that
 the session will not be saved.
 
-### Multi-device (Phase 2, but the field ships now)
+### View-only share links (the multi-device story)
 
-`households/{id}.memberUids: string[]` must exist from day one, as a single-element array, and rules
-must be written as `request.auth.uid in resource.data.memberUids`. Adding the join-link feature later
-then requires no rules change and no data migration. **This is a hard v1 schema requirement.**
+`households/{id}.memberUids: string[]` exists from day one, as a single-element array, and
+writes are authorised on `request.auth.uid in resource.data.memberUids`. Share links need
+no rules change to the write path and no data migration.
+
+A share link is a document in the top-level **`shareLinks/{token}`** collection, where the
+document id **is** the token: a 128-bit base64url bearer secret generated by `newJoinSecret`.
+The document holds `{ householdId, createdAt, updatedAt }` — nothing else.
+The share URL carries only the token: `{origin}/share/{token}`.
+
+- **Creating** a link (the Share button in the period page header, owner pages only, every
+  status) writes the document and copies the URL. The dialog lists every live link with
+  its creation date, each with Copy and Revoke.
+- **Opening** `/share/{token}` resolves the token to its household, then renders the
+  shared home (period table + household panel) and shared period pages under
+  `/share/{token}/period/[periodId]` — the same components, driven read-only.
+- **Read-only is two layers.** The UI layer: a `readOnly` flag on the household context
+  renders every write control **disabled, not hidden** (Create expense period, Add member,
+  Add expense, Settle/Reopen, Delete, inline renames of periods and members), keeps
+  navigation, sorting, filtering, and Copy all working, and period links carry the
+  `/share/{token}` prefix so a visitor can browse every period without ever leaving the
+  shared view. The rules layer: reads of the household subtree are open to any signed-in
+  user (the household and period ids are themselves unguessable, which is what makes an
+  unlisted link unguessable), while **every write stays member-only** — a visitor's
+  anonymous uid is not in `memberUids`, so the rules deny their writes even if the UI
+  did not. Top-level `households` listing is denied outright, so households cannot be
+  enumerated; only single-document gets are open.
+- **Links never expire; revoking is deleting the document.** The revoked-link page says
+  the link is invalid or revoked and links back to `/`.
 
 ### Accepted risks
 
-- Anyone holding the join link can read and write the household. 128-bit, treated as a bearer secret,
-  never logged.
-- Clearing site data loses access on that device until join links ship.
+- Anyone holding a share link — or, equivalently, anyone who already knows an unguessable
+  household id (e.g. from browser devtools before the link was revoked) — can read that
+  household. Revoking stops the link, not a saved id. Accepted for a personal-scale app,
+  same as console access below.
+- Clearing site data loses access on that device until a share link is opened there.
 - No attribution — "who added this" is not recorded, so there is no audit trail.
 - Because periods may overlap, the same real-world date can be counted in two periods. This is
   intended (periods can have different purposes), and the UI must make each period's own scope
@@ -857,6 +900,11 @@ Rules are in §8. Additionally:
   the same batch, never on their own.
 - `createdAt == request.time` on create; `createdAt` immutable on update.
 - Deny-by-default. No `if true` anywhere.
+- Share links: `shareLinks/{token}` allows `get` to any signed-in user, denies `list` and
+  `update`, and allows `create`/`delete` only to members of the link's household
+  (`{ householdId, createdAt }` shape, `createdAt == request.time` on create). Reads of
+  the household subtree allow any signed-in user; every write path still requires
+  membership. Top-level `households` listing is denied.
 
 ### Deleting a period does not cascade in Firestore
 
@@ -1071,7 +1119,7 @@ keeps local data off production.
 | Date picker | Vitest + Testing Library | the calendar exposes two caption dropdowns (month, year); the year list spans 2020–2030; out-of-range days are disabled; an empty picker opens on the current month; choosing a day emits an ISO date |
 | Firestore rules | `@firebase/rules-unit-testing` | unauthenticated read denied; non-member read/write denied; bad `amountMinor`/`name`/`participants` rejected; `isPrePaid` true with null `paidBy` (and the reverse) rejected; expense `date` outside the period rejected; **expense write to a `settled` period rejected** and the same write to an `in_progress` period allowed; `createdAt` mutation rejected; cross-household write denied |
 | UI guard | Vitest | the shadcn primitives still carry the 44px size classes, and no animation library is present (§6) |
-| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member (bare name) and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page**; **adding a member from the home page, rejecting a duplicate name, inline member rename (save, duplicate rejection), and the "Expense periods for {household}" header** |
+| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member (bare name) and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, and the tabbed layout with the Share button on the in-progress page**; **adding a member from the home page, rejecting a duplicate name, inline member rename (save, duplicate rejection), and the "Expense periods for {household}" header**; **share links: create + copy URL from the Share dialog, revoke, the read-only shared home and period pages with every write control disabled, the revoked-link state, and link resolution through the shell** |
 | E2E | Playwright (deferred) | first-run setup dialog → create period → add a pre-paid and an account-paid expense → see transfer amounts → settle → reopen → reload → data still there |
 | Accessibility | axe-core (deferred with Playwright) | zero serious/critical on `/` (including the first-run setup dialog) and `/period/[id]` |
 
@@ -1153,10 +1201,18 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
 - [ ] No member-to-member payment is shown anywhere
 - [ ] Settling a period locks it; reopening unlocks it and changes nothing else
 - [ ] A settled period page drops the tabs and shows the settled amounts (funding line and
-      per-member transfers) at the top, the expense table below under an "Expenses"
-      heading, and a copy-link button that copies the page URL
-- [ ] An in-progress period page keeps the Expenses/Settlement tabs and shows no copy-link
-      button
+      per-member transfers) at the top and the expense table below under an "Expenses"
+      heading
+- [ ] An in-progress period page keeps the Expenses/Settlement tabs
+- [ ] Every period page (owner, any status) has a Share button in the header that opens the
+      share dialog; creating a link copies a `/share/{token}` URL that opens the household
+      read-only on another device
+- [ ] A share visitor can browse the shared home and every period, with sorting, filtering,
+      and Copy all working, while Create period, Add member, Add expense, Settle/Reopen,
+      Delete, and inline renames all render disabled — and the rules deny those writes
+      regardless of the UI
+- [ ] Share links never expire; the dialog lists them with Copy and Revoke, and a revoked
+      (or unknown) token shows the invalid-link state instead of data
 
 **First run**
 - [ ] With no household document in Firestore, `/` opens a centred setup dialog (full-screen sheet
@@ -1198,7 +1254,7 @@ around it.
 | # | Decision | Rationale |
 |---|---|---|
 | 1 | Silent anonymous sign-in, no user-visible auth | What makes Firestore rules safe without a login UI (§7) |
-| 2 | Single household per browser; `memberUids` designed in now | Required for the join-link phase to need no migration |
+| 2 | Single household per browser; `memberUids` designed in now | Required so the share-link phase needs no migration: writes stay authorised on `memberUids` while reads open to signed-in link holders |
 | 3 | **No currency setting; `$` everywhere** | The household is never asked to choose a currency, and no currency is stored |
 | 4 | **Three split modes: equal (default), percent, exact** | A fourth weighting mode was judged unnecessary |
 | 5 | **Settlement rounds owed amounts up, reimbursements down, to whole dollars** | Never disadvantages the household account in either direction |
@@ -1216,11 +1272,13 @@ around it.
 | 17 | **One household per installation; the first run is a dialog on `/`, not a route** | The app holds exactly one household, so there is no "start new household" entry point. A missing household document opens the setup modal inline; an existing one goes straight to the period table, with members already persisted |
 | 18 | **The Prepaid column names the fronting member, bare** | The money model has exactly one fronting member per expense (`paidBy`), so the column shows just the name ("Alex") rather than a "Yes —" prefix; a since-removed fronting member reads as "Removed member", otherwise `No` (§4) |
 | 19 | **Settled period pages restructure; in-progress pages keep tabs** | A settled period is a statement to read and share: settled amounts at the top, the expense table below, no tabs. In-progress periods keep the Expenses/Settlement tabs where the add form and the settle action live |
-| 20 | **Copy link copies the page URL, on settled pages only** | The page URL is the cheapest thing that "brings a member directly to this settled expense period page". Phase 1 (localStorage) links open on the same device; cross-device arrival is the deferred join-link feature (§7), which needs no change here |
+| 20 | **Share replaces Copy link: `/share/{token}` view-only links, every status** | The page URL only opens the period on the same signed-in browser, so it never was a share. The Share button (page header, next to Reopen/Add expense) creates a bearer-secret token link that opens the household read-only on any device; the old Copy-link button is removed |
 | 21 | **Members can be added after setup, from the home page panel** | Setup runs once, so a household that ends up short of members had no in-app recovery. The dialog rejects duplicates per household (§3) and touches no existing expense; the button lives next to the member list, not on period pages |
 | 22 | **No exact-cents line under settlement transfers** | The rounded whole-dollar figure is the transfer — the extra "exact $X · rounded up/down" line added noise without changing what anyone pays |
 | 23 | **The home page owns members: list, inline rename, add button; header names the household** | The member list belongs next to the household identity, not scattered across period pages — so the Add member button moved from the period header into the home household panel, names edit inline on click, the panel leads with a large household name, and the page header reads "Expense periods for {household}" |
 | 24 | **The theme toggle is an icon beside "Create expense period"** | A text "Light/Dark" button under the panel wasted space and attention; a Sun/Moon icon button next to the primary header action is reachable without scrolling and reads without words |
+| 25 | **View-only means disabled, not hidden — plus rules that deny regardless** | A share visitor sees the same pages, so every write control renders disabled (greyed out) rather than vanishing: the page still reads as the household. The rules are the real lock — the visitor's uid is not in `memberUids`, so writes are denied even if the UI did not disable them |
+| 26 | **Reads are open to any signed-in user; writes are member-only; household listing is denied** | Rules cannot check a bearer token, so link secrecy rests on unguessable ids (token, household, period) exactly like a Drive "anyone with the link" URL. Revoking deletes the token; someone who saved the raw household id keeps read access — accepted for a personal-scale app and stated in §7 |
 
 ---
 

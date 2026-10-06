@@ -33,6 +33,11 @@ export const expenseDoc = (householdId: string, periodId: string, expenseId: str
 export const categoriesDoc = (householdId: string) =>
   `households/${householdId}/meta/categories`;
 
+export const shareLinksCol = "shareLinks";
+
+/** Share link documents are top-level and addressed by their token. */
+export const shareLinkDoc = (token: string) => `shareLinks/${token}`;
+
 /** Seeded at household creation so `categoryId` always resolves to something. */
 export const DEFAULT_CATEGORIES = [
   { id: "groceries", label: "Groceries", icon: "🛒", colorHex: "#4ADE80" },

@@ -14,7 +14,7 @@
  *    on the same seam keeps there being exactly one seam.
  */
 
-import type { Category, Expense, ExpensePeriod, Household, Member } from "@/types";
+import type { Category, Expense, ExpensePeriod, Household, Member, ShareLink } from "@/types";
 
 export type CreateExpenseInput = Omit<Expense, "id" | "createdAt" | "updatedAt">;
 export type CreatePeriodInput = Omit<
@@ -46,6 +46,16 @@ export type Repository = {
   createExpense(input: CreateExpenseInput): Promise<Expense>;
   updateExpense(id: string, periodId: string, patch: Partial<Expense>): Promise<void>;
   deleteExpense(id: string, periodId: string): Promise<void>;
+
+  /**
+   * View-only share links (§7). Tokens are bearer secrets: `resolveShareLink`
+   * needs no household context because the token document carries the
+   * household id. Links never expire; deleting one revokes it.
+   */
+  createShareLink(): Promise<ShareLink>;
+  listShareLinks(): Promise<ShareLink[]>;
+  resolveShareLink(token: string): Promise<ShareLink | null>;
+  deleteShareLink(token: string): Promise<void>;
 
   subscribeHousehold(
     onNext: (household: Household | null) => void,

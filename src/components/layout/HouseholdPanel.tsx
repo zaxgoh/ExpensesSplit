@@ -17,7 +17,7 @@ import { AddMemberDialog } from "@/components/members/AddMemberDialog";
  * dialog opens on the next visit.
  */
 export function HouseholdPanel() {
-  const { household } = useHousehold();
+  const { household, readOnly } = useHousehold();
   const [memberDialogOpen, setMemberDialogOpen] = useState(false);
 
   return (
@@ -29,7 +29,12 @@ export function HouseholdPanel() {
       <MemberList />
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="outline" onClick={() => setMemberDialogOpen(true)}>
+        <Button
+          variant="outline"
+          onClick={() => setMemberDialogOpen(true)}
+          disabled={readOnly}
+          title={readOnly ? "View-only link — adding members is disabled" : undefined}
+        >
           <UserPlus className="mr-2 h-4 w-4" aria-hidden />
           Add member
         </Button>
@@ -38,7 +43,9 @@ export function HouseholdPanel() {
         </span>
       </div>
 
-      <AddMemberDialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen} />
+      {readOnly ? null : (
+        <AddMemberDialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen} />
+      )}
     </section>
   );
 }

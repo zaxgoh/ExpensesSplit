@@ -916,14 +916,14 @@ describe("checklist: expenses", () => {
     expect(screen.getByText("No expenses in this period")).toBeInTheDocument();
     // A settled period with nothing to add shows no "Add one" hint.
     expect(screen.queryByText(/add one to see how it splits/i)).not.toBeInTheDocument();
-    // Copy link sits beside Copy all on settled pages only.
-    expect(screen.getByRole("button", { name: /copy link/i })).toBeInTheDocument();
+    // Sharing lives in the page header (top, next to Reopen), on every status.
+    expect(screen.getByRole("button", { name: /^share$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add expense/i })).not.toBeInTheDocument();
     // Reopen lives in the page header and on the settlement card.
     expect(screen.getAllByRole("button", { name: /reopen period/i })).toHaveLength(2);
   });
 
-  it("keeps the tabbed layout and no copy link while in progress", async () => {
+  it("keeps the tabbed layout and offers sharing while in progress", async () => {
     await seedHousehold(["Alex", "Sam"]);
     const period = await createPeriod({ name: "September" });
 
@@ -933,10 +933,10 @@ describe("checklist: expenses", () => {
       expect(screen.getByRole("tab", { name: /expenses/i })).toBeInTheDocument(),
     );
     expect(screen.getByRole("tab", { name: /settlement/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /copy link/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^share$/i })).toBeInTheDocument();
   });
 
-  it("copies the page URL from the copy link button on a settled period", async () => {
+  it("creates a share link from the Share button and copies its URL", async () => {
     // jsdom ships no clipboard, and its Navigator instance does not accept
     // an own clipboard property — so the whole global is stubbed with a
     // wrapper that keeps the real navigator on its prototype chain.
@@ -950,10 +950,6 @@ describe("checklist: expenses", () => {
     try {
       await seedHousehold(["Alex", "Sam"]);
       const period = await createPeriod({ name: "September" });
-      await localRepository.updatePeriod(period.id, {
-        status: "settled",
-        settledAt: Date.now(),
-      });
 
       // Note: no userEvent.setup() here — user-event installs its own
       // navigator.clipboard fake at setup, which would shadow the stub below.
@@ -964,13 +960,23 @@ describe("checklist: expenses", () => {
       );
 
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: /copy link/i })).toBeInTheDocument(),
+        expect(screen.getByRole("button", { name: /^share$/i })).toBeInTheDocument(),
       );
-      fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
-      await waitFor(() => expect(writeText).toHaveBeenCalledWith(window.location.href));
-      expect(
-        await screen.findByRole("button", { name: /^copied$/i }),
-      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /^share$/i }));
+      await screen.findByRole("heading", { name: /share view-only link/i });
+
+      fireEvent.click(screen.getByRole("button", { name: /^create link$/i }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+      const url = writeText.mock.calls[0][0] as string;
+      expect(url).toMatch(new RegExp(`^${window.location.origin}/share/[A-Za-z0-9_-]+$`));
+      // The button keeps its aria-label (one per row) and flips its text.
+      const copyButton = await screen.findByRole("button", { name: /copy share link/i });
+      await waitFor(() => expect(copyButton).toHaveTextContent("Copied"));
+
+      // The link resolves back to this household.
+      const token = url.slice(url.lastIndexOf("/") + 1);
+      const resolved = await localRepository.resolveShareLink(token);
+      expect(resolved?.householdId).toBe((await localRepository.getHousehold())?.id);
     } finally {
       vi.unstubAllGlobals();
     }

@@ -28,7 +28,8 @@ import type { ExpensePeriod, ISODate, StatusFilter as StatusFilterValue } from "
  * state, with the create button still visible in the header.
  */
 export function PeriodTable() {
-  const { repository, household, ready, periods, reloadPeriods } = useHousehold();
+  const { repository, household, ready, periods, reloadPeriods, readOnly, basePath } =
+    useHousehold();
   const [filter, setFilter] = useState<StatusFilterValue>("all");
   const [descending, setDescending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -76,7 +77,11 @@ export function PeriodTable() {
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Button onClick={() => setDialogOpen(true)}>
+          <Button
+            onClick={() => setDialogOpen(true)}
+            disabled={readOnly}
+            title={readOnly ? "View-only link — creating periods is disabled" : undefined}
+          >
             <Plus className="mr-2 h-4 w-4" aria-hidden />
             Create expense period
           </Button>
@@ -138,7 +143,7 @@ export function PeriodTable() {
                 <TableRow key={period.id} className="hover:bg-secondary/40">
                   <TableCell className="font-medium">
                     <Link
-                      href={`/period/${period.id}`}
+                      href={`${basePath}/period/${period.id}`}
                       className="hover:underline focus-visible:underline"
                     >
                       {period.name}
@@ -158,6 +163,8 @@ export function PeriodTable() {
                       size="icon-sm"
                       aria-label={`Delete ${period.name}`}
                       onClick={() => setDeleting(period)}
+                      disabled={readOnly}
+                      title={readOnly ? "View-only link — deleting is disabled" : undefined}
                       className="text-muted-foreground hover:text-negative"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden />

@@ -37,6 +37,7 @@ import {
   startAfter,
   Timestamp,
   updateDoc,
+  where,
   writeBatch,
   type DocumentData,
   type Firestore,
@@ -49,6 +50,7 @@ import {
   ensureSignedIn,
   getDb,
   getStoredHouseholdId,
+  newJoinSecret,
   setStoredHouseholdId,
 } from "@/lib/firebase/client";
 import {
@@ -61,6 +63,8 @@ import {
   membersCol,
   periodDoc,
   periodsCol,
+  shareLinkDoc,
+  shareLinksCol,
 } from "@/lib/firebase/paths";
 import type {
   CreateExpenseInput,
@@ -69,7 +73,7 @@ import type {
   Unsubscribe,
   WatchErrorHandler,
 } from "@/lib/repository/types";
-import type { Category, Expense, ExpensePeriod, Household, Member } from "@/types";
+import type { Category, Expense, ExpensePeriod, Household, Member, ShareLink } from "@/types";
 
 /** Firestore's hard batch limit is 500; 400 leaves headroom and matches §8. */
 const BATCH_LIMIT = 400;
@@ -203,6 +207,18 @@ async function patchDoc(db: Firestore, path: string, fields: DocumentData): Prom
   await updateDoc(doc(db, path), { ...stripUndefined(fields), updatedAt: serverTimestamp() });
 }
 
+function shareLinkFromSnap(
+  token: string,
+  data: DocumentData,
+): ShareLink {
+  return {
+    token,
+    householdId: data.householdId,
+    createdAt: toMillis(data.createdAt),
+    updatedAt: toMillis(data.updatedAt),
+  };
+}
+
 // ---------------------------------------------------------------- identity
 
 let householdIdPromise: Promise<string> | null = null;
@@ -214,7 +230,7 @@ let householdIdPromise: Promise<string> | null = null;
  * key would otherwise open a different household's state after any loss of the
  * anonymous account.
  */
-function householdId(): Promise<string> {
+function ownHouseholdId(): Promise<string> {
   if (!householdIdPromise) {
     householdIdPromise = (async () => {
       const uid = await ensureSignedIn();
@@ -223,6 +239,18 @@ function householdId(): Promise<string> {
     })();
   }
   return householdIdPromise;
+}
+
+/**
+ * The household every repository method scopes to. Normally the owner's own
+ * uid; a view-only share page passes the household id resolved from its token
+ * instead. The visitor still signs in anonymously first, because the rules
+ * require a signed-in reader — their uid just is not in `memberUids`, so every
+ * write the rules see from them is denied.
+ */
+function householdId(override?: string): Promise<string> {
+  if (override) return ensureSignedIn().then(() => override);
+  return ownHouseholdId();
 }
 
 /** Test seam: forget the memoised uid so the next call signs in again. */
@@ -371,10 +399,14 @@ function watchDocument<T>(
  * arrives from an async sign-in. This returns a working unsubscribe immediately
  * and defers attaching the listener, so callers never have to handle a promise.
  */
-function defer<T>(attach: (hid: string) => Unsubscribe, onError?: WatchErrorHandler): Unsubscribe {
+function defer<T>(
+  attach: (hid: string) => Unsubscribe,
+  onError?: WatchErrorHandler,
+  override?: string,
+): Unsubscribe {
   let cancelled = false;
   let inner: Unsubscribe = () => {};
-  void householdId()
+  void householdId(override)
     .then((hid) => {
       if (cancelled) return;
       inner = attach(hid);
@@ -388,12 +420,26 @@ function defer<T>(attach: (hid: string) => Unsubscribe, onError?: WatchErrorHand
 
 // -------------------------------------------------------------- repository
 
-export function createFirestoreRepository(): Repository {
+export function createFirestoreRepository(options?: {
+  /**
+   * Fix the household every method scopes to. A view-only share page passes
+   * the household id resolved from its token; everything else omits it and
+   * the anonymous uid is used.
+   */
+  householdId?: string;
+}): Repository {
+  const override = options?.householdId;
+  const resolveHid = () => householdId(override);
+  const deferFor = <T>(
+    attach: (hid: string) => Unsubscribe,
+    onError?: WatchErrorHandler,
+  ): Unsubscribe => defer(attach, onError, override);
+
   return {
     // ----------------------------------------------------------- household
 
     async getHousehold() {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const snap = await getDoc(doc(getDb(), householdDoc(hid)));
       if (!snap.exists()) return null;
       const data = snap.data();
@@ -410,7 +456,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async createHousehold(name) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const now = Date.now();
       const household: Household = {
         id: hid,
@@ -442,13 +488,13 @@ export function createFirestoreRepository(): Repository {
     // ------------------------------------------------------------- members
 
     async listMembers() {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const snap = await getDocs(collection(getDb(), membersCol(hid)));
       return snap.docs.map(memberFromSnap);
     },
 
     async createMember(name, avatar) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const db = getDb();
       const household = await getDoc(doc(db, householdDoc(hid)));
       const registered: string[] = household.data()?.memberIds ?? [];
@@ -482,7 +528,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async updateMember(id, patch) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       await patchDoc(getDb(), memberDoc(hid, id), memberFields(patch));
     },
 
@@ -493,7 +539,7 @@ export function createFirestoreRepository(): Repository {
     // ------------------------------------------------------------- periods
 
     async listPeriods() {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const snap = await getDocs(
         query(collection(getDb(), periodsCol(hid)), orderBy("startDate", "asc")),
       );
@@ -501,7 +547,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async createPeriod(input: CreatePeriodInput) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const now = Date.now();
       const period: ExpensePeriod = {
         ...input,
@@ -519,12 +565,12 @@ export function createFirestoreRepository(): Repository {
     },
 
     async updatePeriod(id, patch) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       await patchDoc(getDb(), periodDoc(hid, id), periodFields(patch));
     },
 
     async deletePeriod(id) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const db = getDb();
       const path = expensesCol(hid, id);
 
@@ -552,7 +598,7 @@ export function createFirestoreRepository(): Repository {
     // ----------------------------------------------------------- expenses
 
     async listExpenses(periodId) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const snap = await getDocs(
         query(collection(getDb(), expensesCol(hid, periodId)), orderBy("date", "asc")),
       );
@@ -560,7 +606,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async createExpense(input: CreateExpenseInput) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const parent = await requireOpenPeriod(hid, input.periodId, "add an expense");
       assertDateInPeriod(parent, input.date);
 
@@ -582,7 +628,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async updateExpense(id, periodId, patch) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       const parent = await requireOpenPeriod(hid, periodId, "edit an expense");
       const db = getDb();
 
@@ -600,7 +646,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     async deleteExpense(id, periodId) {
-      const hid = await householdId();
+      const hid = await resolveHid();
       await requireOpenPeriod(hid, periodId, "delete an expense");
 
       const totals = await periodTotals(hid, periodId, { kind: "remove", id });
@@ -611,10 +657,54 @@ export function createFirestoreRepository(): Repository {
       await batch.commit();
     },
 
+    // --------------------------------------------------------- share links
+    //
+    // Tokens live in a top-level collection addressed by the token itself, so
+    // resolving one needs no household context — that is what lets a visitor
+    // on another device turn `/share/{token}` into a household id. Reads of
+    // the household subtree are open to any signed-in user (the ids are
+    // unguessable, exactly like a Drive "anyone with the link" URL); writes
+    // stay member-only, so a share visitor is read-only by rules, not just
+    // by hidden buttons.
+
+    async createShareLink() {
+      const hid = await resolveHid();
+      const token = newJoinSecret();
+      const now = Date.now();
+      await createDoc(getDb(), shareLinkDoc(token), { householdId: hid });
+      return { token, householdId: hid, createdAt: now, updatedAt: now };
+    },
+
+    async listShareLinks() {
+      const hid = await resolveHid();
+      // `where` alone: adding an `orderBy` would need a composite index for a
+      // two-row admin list, so the sort happens client-side instead.
+      const snap = await getDocs(
+        query(collection(getDb(), shareLinksCol), where("householdId", "==", hid)),
+      );
+      return snap.docs
+        .map((child) => shareLinkFromSnap(child.id, child.data()))
+        .sort((a, b) => b.createdAt - a.createdAt);
+    },
+
+    async resolveShareLink(token) {
+      // No household context: the token document is what carries it. Auth is
+      // still established first because the rules require a signed-in reader.
+      await ensureSignedIn();
+      const snap = await getDoc(doc(getDb(), shareLinkDoc(token)));
+      if (!snap.exists()) return null;
+      return shareLinkFromSnap(snap.id, snap.data());
+    },
+
+    async deleteShareLink(token) {
+      await ensureSignedIn();
+      await deleteDoc(doc(getDb(), shareLinkDoc(token)));
+    },
+
     // ----------------------------------------------------------- realtime
 
     subscribeHousehold(onNext, onError) {
-      return defer(
+      return deferFor(
         (hid) =>
           watchDocument(
             householdDoc(hid),
@@ -639,7 +729,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     subscribeMembers(onNext, onError) {
-      return defer(
+      return deferFor(
         (hid) =>
           watchCollection(
             membersCol(hid),
@@ -652,7 +742,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     subscribePeriods(onNext, onError) {
-      return defer(
+      return deferFor(
         (hid) =>
           watchCollection(
             periodsCol(hid),
@@ -666,7 +756,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     subscribeCategories(onNext, onError) {
-      return defer(
+      return deferFor(
         (hid) =>
           watchDocument(
             categoriesDoc(hid),
@@ -679,7 +769,7 @@ export function createFirestoreRepository(): Repository {
     },
 
     subscribeExpenses(periodId, onNext, onError) {
-      return defer(
+      return deferFor(
         (hid) =>
           watchCollection(
             expensesCol(hid, periodId),

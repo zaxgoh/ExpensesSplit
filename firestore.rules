@@ -36,6 +36,15 @@ rules_version = '2';
  *    likewise written with `hasOnly`/field access rather than `==`, which had
  *    never been exercised by a passing rule and was replaced defensively in
  *    the same pass.
+ *
+ * View-only share links (§7) work like Drive "anyone with the link" URLs:
+ * the token is a 128-bit bearer secret and the share URL carries only it, so
+ * reads of the household subtree are open to any signed-in user — the
+ * household and period ids are themselves unguessable, which is what makes
+ * the link unguessable. Writes stay member-only everywhere, so a share
+ * visitor is read-only by rules, not just by disabled buttons. Top-level
+ * `households` listing is denied outright (there is no legitimate list query)
+ * so households cannot be enumerated; only single-document gets are open.
  */
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -115,7 +124,13 @@ service cloud.firestore {
         && request.resource.data.memberIds.size() == 0
         && request.resource.data.createdAt == request.time;
 
-      allow read: if isMember(hid) || householdMissing(hid);
+      // Single-document gets are open to any signed-in user: a share visitor
+      // holds the unguessable household id via their token, and there is no
+      // rule construct that could check the token itself. Listing the
+      // top-level collection would enumerate households, so it is denied —
+      // no legitimate query lists households.
+      allow get: if isSignedIn() || householdMissing(hid);
+      allow list: if false;
 
       /**
        * `memberUids` is immutable — it is the access control list, and letting
@@ -164,7 +179,7 @@ service cloud.firestore {
             && request.resource.data.archived is bool;
         }
 
-        allow read: if isMember(hid) || householdMissing(hid);
+        allow read: if isSignedIn() || householdMissing(hid);
 
         /**
          * A member document may only be created once its id is registered in the
@@ -219,7 +234,7 @@ service cloud.firestore {
             : request.resource.data.settledAt == null;
         }
 
-        allow read: if isMember(hid) || householdMissing(hid);
+        allow read: if isSignedIn() || householdMissing(hid);
 
         allow create: if isMember(hid)
           && validPeriodShape()
@@ -278,7 +293,7 @@ service cloud.firestore {
                  );
           }
 
-          allow read: if isMember(hid) || householdMissing(hid);
+          allow read: if isSignedIn() || householdMissing(hid);
 
           allow create: if isMember(hid)
             && periodAfter(hid, pid).data.status == 'in_progress'
@@ -298,13 +313,38 @@ service cloud.firestore {
       // ----------------------------------------------------------------- meta
 
       match /meta/{id} {
-        allow read: if isMember(hid) || householdMissing(hid);
+        allow read: if isSignedIn() || householdMissing(hid);
         // Seeded once, immediately after the household is created, so the
         // household already exists in committed state and `isMember` can see it.
         // Nothing else writes here in v1.
         allow create: if isMember(hid) && id == 'categories';
         allow update, delete: if false;
       }
+    }
+
+    // ------------------------------------------------------------ share links
+    //
+    // View-only share links (§7). The token is the document id — a 128-bit
+    // bearer secret — and resolution needs no household context, which is
+    // what lets another device turn `/share/{token}` into a household.
+    // Anyone signed in can resolve a token they hold; only members create
+    // and revoke. Links never expire, so updates are refused outright and
+    // revocation is a delete. Listing is denied so tokens cannot be
+    // enumerated.
+
+    match /shareLinks/{token} {
+      function validShareLink() {
+        return request.resource.data.householdId is string
+          && request.resource.data.householdId.size() > 0
+          && request.resource.data.keys().hasOnly(['householdId', 'createdAt'])
+          && request.resource.data.createdAt == request.time;
+      }
+
+      allow get: if isSignedIn();
+      allow list: if false;
+      allow create: if validShareLink() && isMember(request.resource.data.householdId);
+      allow update: if false;
+      allow delete: if isMember(resource.data.householdId);
     }
   }
 }

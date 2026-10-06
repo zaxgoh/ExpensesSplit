@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Link2, RotateCcw } from "lucide-react";
+import { Check, Copy, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useHousehold } from "@/components/layout/HouseholdProvider";
 import { formatMoney, formatMoneyWhole } from "@/lib/money/minorUnits";
 import type { PeriodTotals } from "@/lib/split/account";
 import type { ExpensePeriod, Member } from "@/types";
@@ -10,7 +11,8 @@ import type { ExpensePeriod, Member } from "@/types";
 /**
  * F6: the settlement card. Shows each member's transfer against the household
  * account, using the whole-dollar settled figures from PLAN.md section 4.
- * On a settled period it also renders the Copy link button beside Copy all.
+ * Sharing lives in the period page header (§7): this card keeps Copy all plus
+ * Settle / Reopen, which render disabled on a view-only share page.
  */
 export function TransferSummary({
   period,
@@ -26,8 +28,8 @@ export function TransferSummary({
   onReopen: () => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [confirming, setConfirming] = useState<"settle" | "reopen" | null>(null);
+  const { readOnly } = useHousehold();
   const settled = period.status === "settled";
 
   const nonZero = totals.transfers.filter((t) => t.toAccountExact !== 0);
@@ -50,20 +52,6 @@ export function TransferSummary({
       setTimeout(() => setCopied(false), 2000);
     } catch {
       setCopied(false);
-    }
-  }
-
-  /**
-   * F6: copies the page URL so it can be sent to other members to bring them
-   * directly to this settled expense period page. Shown on settled pages only.
-   */
-  async function copyLink() {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    } catch {
-      setLinkCopied(false);
     }
   }
 
@@ -120,23 +108,22 @@ export function TransferSummary({
         </Button>
 
         {settled ? (
-          <Button variant="outline" size="sm" onClick={copyLink}>
-            {linkCopied ? (
-              <Check className="mr-2 h-4 w-4" />
-            ) : (
-              <Link2 className="mr-2 h-4 w-4" />
-            )}
-            {linkCopied ? "Copied" : "Copy link"}
-          </Button>
-        ) : null}
-
-        {settled ? (
-          <Button size="sm" onClick={() => setConfirming("reopen")}>
+          <Button
+            size="sm"
+            onClick={() => setConfirming("reopen")}
+            disabled={readOnly}
+            title={readOnly ? "View-only link — reopening is disabled" : undefined}
+          >
             <RotateCcw className="mr-2 h-4 w-4" />
             Reopen period
           </Button>
         ) : (
-          <Button size="sm" onClick={() => setConfirming("settle")}>
+          <Button
+            size="sm"
+            onClick={() => setConfirming("settle")}
+            disabled={readOnly}
+            title={readOnly ? "View-only link — settling is disabled" : undefined}
+          >
             <Check className="mr-2 h-4 w-4" />
             Settle period
           </Button>

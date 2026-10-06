@@ -91,4 +91,17 @@ export type Category = {
   colorHex: string;
 };
 
+/**
+ * A view-only share link (§7). The token is a 128-bit base64url bearer secret
+ * and the document id: the share URL is `/share/{token}` and carries no
+ * household id, which the token document resolves. Links never expire;
+ * deleting the document revokes the link.
+ */
+export type ShareLink = {
+  token: string;
+  householdId: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export type StatusFilter = "all" | PeriodStatus;

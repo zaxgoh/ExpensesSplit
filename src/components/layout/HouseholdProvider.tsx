@@ -25,6 +25,17 @@ type HouseholdContextValue = {
   error: Error | null;
   /** True once the household document has resolved, either way. */
   ready: boolean;
+  /**
+   * True on a view-only share page (§7). Every write control reads this and
+   * renders disabled rather than hidden, so a visitor can see what exists
+   * without being able to touch it. The rules deny the writes regardless.
+   */
+  readOnly: boolean;
+  /**
+   * Prefix for period links. Empty for the owner (`/period/[id]`); a share
+   * page passes `/share/{token}` so navigation stays inside the shared view.
+   */
+  basePath: string;
   reloadMembers: () => Promise<void>;
   reloadPeriods: () => Promise<void>;
   setHousehold: (household: Household) => void;
@@ -41,9 +52,13 @@ const HouseholdContext = createContext<HouseholdContextValue | null>(null);
 export function HouseholdProvider({
   children,
   repository = firestoreRepository,
+  readOnly = false,
+  basePath = "",
 }: {
   children: ReactNode;
   repository?: Repository;
+  readOnly?: boolean;
+  basePath?: string;
 }) {
   const [household, setHousehold] = useState<Household | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -102,11 +117,25 @@ export function HouseholdProvider({
       status,
       error,
       ready: status !== "loading",
+      readOnly,
+      basePath,
       reloadMembers,
       reloadPeriods,
       setHousehold,
     }),
-    [repository, household, members, periods, categories, status, error, reloadMembers, reloadPeriods],
+    [
+      repository,
+      household,
+      members,
+      periods,
+      categories,
+      status,
+      error,
+      readOnly,
+      basePath,
+      reloadMembers,
+      reloadPeriods,
+    ],
   );
 
   return (

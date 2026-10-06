@@ -11,7 +11,7 @@ import type {
   Unsubscribe,
   WatchErrorHandler,
 } from "@/lib/repository/types";
-import type { Category, Expense, ExpensePeriod, Household, Member } from "@/types";
+import type { Category, Expense, ExpensePeriod, Household, Member, ShareLink } from "@/types";
 import { DEFAULT_CATEGORIES } from "@/lib/firebase/paths";
 import { AVATARS } from "@/lib/members/avatars";
 
@@ -21,6 +21,7 @@ const KEYS = {
   periods: "1stsplit:periods",
   expenses: "1stsplit:expenses",
   categories: "1stsplit:categories",
+  shareLinks: "1stsplit:shareLinks",
   theme: "1stsplit:theme",
   lastPeriodId: "1stsplit:lastPeriodId",
 } as const;
@@ -61,6 +62,21 @@ function write(key: string, value: unknown): void {
 function uid(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
   return `id-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+}
+
+/** 128-bit base64url bearer secret, mirroring `newJoinSecret` in firebase/client. */
+function newToken(): string {
+  try {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    let binary = "";
+    bytes.forEach((b) => {
+      binary += String.fromCharCode(b);
+    });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  } catch {
+    return uid();
+  }
 }
 
 /** Stable colour per member so a member keeps their colour across reloads. */
@@ -276,6 +292,39 @@ export const localRepository: Repository = {
 
     saveExpenses(allExpenses().filter((e) => e.id !== id));
     touchPeriod(periodId);
+  },
+
+  // -------------------------------------------------------------- share links
+
+  async createShareLink() {
+    const household = read<Household | null>(KEYS.household, null);
+    if (!household) throw new Error("Create a household before sharing it.");
+    const now = Date.now();
+    const link: ShareLink = {
+      token: newToken(),
+      householdId: household.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const links = read<ShareLink[]>(KEYS.shareLinks, []);
+    links.push(link);
+    write(KEYS.shareLinks, links);
+    return link;
+  },
+
+  async listShareLinks() {
+    return [...read<ShareLink[]>(KEYS.shareLinks, [])].sort((a, b) => b.createdAt - a.createdAt);
+  },
+
+  async resolveShareLink(token) {
+    return read<ShareLink[]>(KEYS.shareLinks, []).find((link) => link.token === token) ?? null;
+  },
+
+  async deleteShareLink(token) {
+    write(
+      KEYS.shareLinks,
+      read<ShareLink[]>(KEYS.shareLinks, []).filter((link) => link.token !== token),
+    );
   },
 
   // ---------------------------------------------------------------- realtime

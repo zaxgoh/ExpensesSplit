@@ -13,13 +13,33 @@ import type { Member } from "@/types";
  * collides is rejected inline.
  */
 export function MemberList() {
-  const { members } = useHousehold();
+  const { members, readOnly } = useHousehold();
 
   if (members.length === 0) {
     return (
       <p className="text-base text-muted-foreground">
         No members yet — add the first below.
       </p>
+    );
+  }
+
+  // View-only: names are plain text. Renaming is an owner action, and the
+  // rules deny the write regardless — so no edit affordance is offered.
+  if (readOnly) {
+    return (
+      <ul className="grid gap-2">
+        {members.map((member) => (
+          <li
+            key={member.id}
+            className="flex min-h-11 w-full items-center gap-2.5 rounded-lg border px-3 text-base"
+          >
+            <span aria-hidden="true" className="text-xl">
+              {member.avatar}
+            </span>
+            <span className="font-medium">{member.name}</span>
+          </li>
+        ))}
+      </ul>
     );
   }
 
