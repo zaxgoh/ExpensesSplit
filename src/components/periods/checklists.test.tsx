@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { PeriodTable } from "@/components/periods/PeriodTable";
 import { PeriodView } from "@/components/periods/PeriodView";
+import { HouseholdPanel } from "@/components/layout/HouseholdPanel";
 import { HouseholdProvider } from "@/components/layout/HouseholdProvider";
 import { localRepository } from "@/lib/repository/local";
 import { periodSchema } from "@/lib/validation/schemas";
@@ -350,8 +351,8 @@ describe("checklist: expenses", () => {
     });
 
     mount(<PeriodView periodId={period.id} />);
-    await waitFor(() => expect(screen.getByText(/yes — sam/i)).toBeInTheDocument());
-    expect(screen.getByText(/from account/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/^sam$/i)).toBeInTheDocument());
+    expect(screen.getByText(/^no$/i)).toBeInTheDocument();
   });
 
   it("shows Removed member for a fronting member removed since", async () => {
@@ -380,7 +381,7 @@ describe("checklist: expenses", () => {
 
     mount(<PeriodView periodId={period.id} />);
     await waitFor(() =>
-      expect(screen.getByText(/yes — removed member/i)).toBeInTheDocument(),
+      expect(screen.getByText(/^removed member$/i)).toBeInTheDocument(),
     );
   });
 
@@ -975,17 +976,26 @@ describe("checklist: expenses", () => {
     }
   });
 
-  it("adds a member from the period page and offers them in the expense form", async () => {
+  it("adds a member from the home page and offers them in the expense form", async () => {
     await seedHousehold(["Alex", "Sam"]);
     const period = await createPeriod({ name: "September" });
 
     const user = userEvent.setup();
-    mount(<PeriodView periodId={period.id} />);
+    const home = mount(
+      <>
+        <PeriodTable />
+        <HouseholdPanel />
+      </>,
+    );
+
+    // Home header names the household; the member list names both members.
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: /^add member$/i }),
+        screen.getByRole("heading", { name: /expense periods for test household/i }),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByRole("button", { name: /rename alex/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /rename sam/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^add member$/i }));
     await user.type(await screen.findByLabelText(/member name/i), "Riley");
@@ -994,9 +1004,20 @@ describe("checklist: expenses", () => {
     await waitFor(async () =>
       expect(await localRepository.listMembers()).toHaveLength(3),
     );
-    // The dialog closes and the new member is offered in the split.
+    // The dialog closes and the new member joins the list.
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: /rename riley/i })).toBeInTheDocument();
+
+    // And the expense form offers them in the split.
+    home.unmount();
+    mount(<PeriodView periodId={period.id} />);
+    // The remounted page resolves its subscriptions asynchronously.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^add expense$/i }),
+      ).toBeInTheDocument(),
     );
     await openAddExpenseForm(user);
     expect(screen.getByRole("checkbox", { name: /riley/i })).toBeInTheDocument();
@@ -1004,10 +1025,15 @@ describe("checklist: expenses", () => {
 
   it("rejects a duplicate member name when adding", async () => {
     await seedHousehold(["Alex", "Sam"]);
-    const period = await createPeriod({ name: "September" });
+    await createPeriod({ name: "September" });
 
     const user = userEvent.setup();
-    mount(<PeriodView periodId={period.id} />);
+    mount(
+      <>
+        <PeriodTable />
+        <HouseholdPanel />
+      </>,
+    );
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: /^add member$/i }),
@@ -1022,22 +1048,60 @@ describe("checklist: expenses", () => {
     expect(await localRepository.listMembers()).toHaveLength(2);
   });
 
-  it("shows no add-member button on a settled period", async () => {
-    await seedHousehold(["Alex", "Sam"]);
-    const period = await createPeriod({ name: "September" });
-    await localRepository.updatePeriod(period.id, {
-      status: "settled",
-      settledAt: Date.now(),
-    });
+  it("renames a member inline from the home member list", async () => {
+    const [alex] = await seedHousehold(["Alex", "Sam"]);
+    await createPeriod({ name: "September" });
 
-    mount(<PeriodView periodId={period.id} />);
-
+    const user = userEvent.setup();
+    mount(
+      <>
+        <PeriodTable />
+        <HouseholdPanel />
+      </>,
+    );
     await waitFor(() =>
-      expect(screen.getByText("No expenses in this period")).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /rename alex/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /rename alex/i }));
+    const box = await screen.findByLabelText(/new name for alex/i);
+    await user.clear(box);
+    await user.type(box, "Alexandra");
+    await user.keyboard("{Enter}");
+
+    await waitFor(async () =>
+      expect((await localRepository.listMembers()).find((m) => m.id === alex)).toEqual(
+        expect.objectContaining({ name: "Alexandra" }),
+      ),
     );
     expect(
-      screen.queryByRole("button", { name: /^add member$/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /rename alexandra/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("rejects a duplicate member name when renaming", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    await createPeriod({ name: "September" });
+
+    const user = userEvent.setup();
+    mount(
+      <>
+        <PeriodTable />
+        <HouseholdPanel />
+      </>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /rename alex/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /rename alex/i }));
+    const box = await screen.findByLabelText(/new name for alex/i);
+    await user.clear(box);
+    await user.type(box, "sam");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText(/already has that name/i)).toBeInTheDocument();
+    expect((await localRepository.listMembers()).find((m) => m.name === "Alex")).toBeTruthy();
   });
 });
 

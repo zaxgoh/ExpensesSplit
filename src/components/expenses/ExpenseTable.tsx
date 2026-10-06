@@ -164,19 +164,14 @@ export function ExpenseTable({
                 </TableCell>
                 <TableCell>
                   {expense.isPrePaid ? (
-                    <span className="text-positive">
-                      Yes —{" "}
-                      {(() => {
-                        const fronting = members.find((m) => m.id === expense.paidBy);
-                        return fronting && !fronting.archived
-                          ? fronting.name
-                          : "Removed member";
-                      })()}
-                    </span>
+                    (() => {
+                      const fronting = members.find((m) => m.id === expense.paidBy);
+                      return fronting && !fronting.archived
+                        ? fronting.name
+                        : "Removed member";
+                    })()
                   ) : (
-                    <span className="text-muted-foreground">
-                      No <span className="text-xs">(from account)</span>
-                    </span>
+                    <span className="text-muted-foreground">No</span>
                   )}
                 </TableCell>
                 <TableCell>{MODE_LABEL[expense.splitMode]}</TableCell>

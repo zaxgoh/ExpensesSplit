@@ -144,7 +144,8 @@ src/
                    InlinePeriodName, ConfirmDeleteDialog, PeriodView
     expenses/      ExpenseTable, AddExpenseForm
     settlement/    TransferSummary
-    members/       HouseholdSetupDialog (first-run modal: household name + members)
+    members/       HouseholdSetupDialog (first-run modal), AddMemberDialog,
+                   MemberList (home member list with inline rename)
   lib/
     repository/    types.ts (the Repository interface), local.ts (localStorage impl)
     firebase/      client.ts, emulator.ts, paths.ts
@@ -442,7 +443,10 @@ per installation, so the first run is a dialog on `/`, not a separate destinatio
 
 `/` always renders the period table, which is the app's landing page. It has:
 
-- A **"Create expense period"** button, always visible in the page header.
+- A page header reading **"Expense periods for {household name}"**, with the
+  **"Create expense period"** button (always visible) and the **theme toggle**
+  beside it — an icon-only button (Sun offers light while dark is active and
+  vice versa), not a text label.
 - A **status filter** above the table, as a dropdown: `All periods` (default) / `In progress` /
   `Settled`, each showing its count.
 - A table with these columns, in this order:
@@ -463,6 +467,11 @@ per installation, so the first run is a dialog on `/`, not a separate destinatio
 - Rows are clickable via the Name link. `0` periods is not a special error state — the table body shows
   an empty-state row ("No expense periods yet") **and** the header's "Create expense period" button
   remains visible and is the primary call to action.
+- Below the table, a **household panel** shows the household name (large), the member list, and an
+  **"Add member"** button. Each member row shows the avatar and the name; clicking a name turns
+  it into a textbox for inline rename (Enter or blur saves, Escape cancels; empty and duplicate
+  names are rejected inline, duplicates compared case-insensitively against every member).
+  The panel is the only post-setup place members are added or renamed.
 
 ### F3 — create an expense period
 
@@ -488,7 +497,7 @@ name, date range, total, `StatusBadge`) above a **table of expenses** with these
 | 1 | Date | `date`, formatted `MMM D, YYYY`; sortable |
 | 2 | Name | `name`; opens the edit form when clicked; sortable |
 | 3 | Description | `description`, or an em dash when empty |
-| 4 | Prepaid | `Yes — <member name>` for a pre-paid expense — the member who fronted it (`paidBy`; "Removed member" if they have since been removed) — or `No` with a muted "from account" hint |
+| 4 | Prepaid | the fronting member's name for a pre-paid expense (`paidBy`; "Removed member" if they have since been removed) — or `No` |
 | 5 | Mode of split | `Equal` / `Exact` / `Percentage` |
 | 6 | Amount | `amountMinor` as `$X,XXX.XX`; sortable |
 | 7 | Actions | a delete button (see F9) |
@@ -501,11 +510,8 @@ name, date range, total, `StatusBadge`) above a **table of expenses** with these
   shuffles equal rows between renders.
 - An empty period shows a designed empty state, not a blank table.
 
-An **"Add expense"** button in the page header opens the form (F5). An **"Add member"**
-button beside it opens a dialog with a single member-name input (live avatar preview continuing
-the setup round-robin); it rejects an empty name and a name another member — archived or not —
-already uses, case-insensitively. It appears only while the period is `in progress`: a settled
-period is read-only and gains no members. Clicking an expense's name opens
+An **"Add expense"** button in the page header opens the form (F5). Members are added from the
+home page panel (F2), not here. Clicking an expense's name opens
 the same form pre-filled for editing. Deleting an expense is **permanent and always confirmed** — see
 F9; there is no undo.
 
@@ -645,7 +651,8 @@ a misclick must not destroy data. The dialog names the target and the collateral
 ## 6. UI and design
 
 Dark-first, premium fintech feel. Light theme available, defaulting to `prefers-color-scheme`, with a
-manual toggle persisted to `localStorage` under `1stsplit:theme`.
+manual toggle persisted to `localStorage` under `1stsplit:theme` — an icon-only Sun/Moon button
+beside "Create expense period" in the home page header.
 
 ### Tokens (CSS custom properties in `globals.css`, referenced via Tailwind v4 `@theme`)
 
@@ -703,8 +710,8 @@ action rather than a selected state, and its only visual difference is a fill.
 3. **CreatePeriodDialog** — name plus two dropdown date pickers (F3).
 4. **ExpenseTable** — the F4 table: Date / Name / Amount sortable, per-row edit and delete, read-only
    when the period is settled. Takes the household's member list so the Prepaid column can name
-   the fronting member (`Yes — Alex`, or "Removed member" for a fronting member who has since been
-   removed); the column stays non-sortable.
+   the fronting member (bare name, or "Removed member" for a fronting member who has since been
+   removed, or `No`); the column stays non-sortable.
 5. **AddExpenseForm** — F5, including the `Prepaid by a member` checkbox with its "Fronted by"
    dropdown, and the `Equal` / `Exact` / `Percentage` split editor — a mode dropdown plus a checkbox
    per member — with a live preview. The split section is hidden entirely while pre-paid, replaced by
@@ -732,10 +739,12 @@ action rather than a selected state, and its only visual difference is a fill.
     mobile): household name input plus ≥2 member inputs with live avatar preview, and a
     **Continue** action that creates the household and its members. Rendered by the home page only
     while no household document exists; no button or route opens it otherwise.
-12. **AddMemberDialog** — post-setup member creation from an in-progress period page: one name
+12. **AddMemberDialog** — post-setup member creation from the home page panel: one name
     input with live avatar preview, duplicate rejection, and an **Add** action that creates the
     member and refreshes the household's member list. Past expenses are untouched; the new
     member joins every future split with a zero balance so far.
+13. **MemberList** — the home page member list: one row per member with avatar and name;
+    clicking a name edits it inline (Enter/blur saves, Escape cancels, duplicates rejected).
 
 ### Guarding the shadcn primitives
 
@@ -754,7 +763,8 @@ optional field defaulting to `other`; it is not a required column of the expense
 ### Accessibility
 
 WCAG 2.1 AA, and part of the definition of done:
-- Full keyboard path through create-period, add-expense, save, settle, reopen, rename, copy link,
+- Full keyboard path through create-period, add-expense, save, settle, reopen, rename (period and
+  member), copy link,
   delete, and dialog close (`Esc`).
 - The period and expense tables are real `<table>` markup with `<th scope="col">` headers, so column
   association survives; a row is opened via a link/button inside the name cell rather than a click
@@ -1061,7 +1071,7 @@ keeps local data off production.
 | Date picker | Vitest + Testing Library | the calendar exposes two caption dropdowns (month, year); the year list spans 2020–2030; out-of-range days are disabled; an empty picker opens on the current month; choosing a day emits an ISO date |
 | Firestore rules | `@firebase/rules-unit-testing` | unauthenticated read denied; non-member read/write denied; bad `amountMinor`/`name`/`participants` rejected; `isPrePaid` true with null `paidBy` (and the reverse) rejected; expense `date` outside the period rejected; **expense write to a `settled` period rejected** and the same write to an `in_progress` period allowed; `createdAt` mutation rejected; cross-household write denied |
 | UI guard | Vitest | the shadcn primitives still carry the 44px size classes, and no animation library is present (§6) |
-| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member ("Yes — Alex") and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page**; **adding a member from an in-progress period page, rejecting a duplicate name, and no add-member button on a settled page** |
+| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member (bare name) and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page**; **adding a member from the home page, rejecting a duplicate name, inline member rename (save, duplicate rejection), and the "Expense periods for {household}" header** |
 | E2E | Playwright (deferred) | first-run setup dialog → create period → add a pre-paid and an account-paid expense → see transfer amounts → settle → reopen → reload → data still there |
 | Accessibility | axe-core (deferred with Playwright) | zero serious/critical on `/` (including the first-run setup dialog) and `/period/[id]` |
 
@@ -1120,10 +1130,12 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
       without relying on colour alone
 - [ ] Expenses cannot be added, edited or deleted in a settled period, and a reopened period accepts
       them again
-- [ ] A member can be added from an in-progress period page (no add control on settled pages);
-      duplicate names are rejected and past expenses are untouched
-- [ ] The Prepaid column names the member who fronted a pre-paid expense ("Yes — Alex"),
-      and shows "Removed member" when that member has since been removed
+- [ ] A member can be added from the home page panel; duplicate names are rejected
+      and past expenses are untouched
+- [ ] The home page lists every member by avatar and name, and a name can be renamed inline
+      (Enter/blur saves, Escape cancels, duplicates rejected)
+- [ ] The Prepaid column names the member who fronted a pre-paid expense (bare name),
+      shows "Removed member" when that member has since been removed, and shows `No` otherwise
 
 **Deletion**
 - [ ] Deletion is permanent and always confirmed; no UI or documentation implies it can be undone
@@ -1202,11 +1214,13 @@ around it.
 | 15 | **A period is renamed inline from its page header only** | One obvious place to edit it; the home table displays the result but is not itself editable |
 | 16 | **The front end was built first against a `localStorage` repository, then swapped to Firestore** | Lets the whole UI, the split engine and every interaction be built and tested before a backend exists. The `Repository` interface makes the swap one file |
 | 17 | **One household per installation; the first run is a dialog on `/`, not a route** | The app holds exactly one household, so there is no "start new household" entry point. A missing household document opens the setup modal inline; an existing one goes straight to the period table, with members already persisted |
-| 18 | **The Prepaid column names the fronting member** | The money model has exactly one fronting member per expense (`paidBy`), so the column shows "Yes — Alex" rather than a bare "Yes"; a since-removed fronting member reads as "Removed member" (§4) |
+| 18 | **The Prepaid column names the fronting member, bare** | The money model has exactly one fronting member per expense (`paidBy`), so the column shows just the name ("Alex") rather than a "Yes —" prefix; a since-removed fronting member reads as "Removed member", otherwise `No` (§4) |
 | 19 | **Settled period pages restructure; in-progress pages keep tabs** | A settled period is a statement to read and share: settled amounts at the top, the expense table below, no tabs. In-progress periods keep the Expenses/Settlement tabs where the add form and the settle action live |
 | 20 | **Copy link copies the page URL, on settled pages only** | The page URL is the cheapest thing that "brings a member directly to this settled expense period page". Phase 1 (localStorage) links open on the same device; cross-device arrival is the deferred join-link feature (§7), which needs no change here |
-| 21 | **Members can be added after setup, from an in-progress period page** | Setup runs once, so a household that ends up short of members had no in-app recovery. The dialog rejects duplicates per household (§3) and touches no existing expense; settled pages show no add control |
+| 21 | **Members can be added after setup, from the home page panel** | Setup runs once, so a household that ends up short of members had no in-app recovery. The dialog rejects duplicates per household (§3) and touches no existing expense; the button lives next to the member list, not on period pages |
 | 22 | **No exact-cents line under settlement transfers** | The rounded whole-dollar figure is the transfer — the extra "exact $X · rounded up/down" line added noise without changing what anyone pays |
+| 23 | **The home page owns members: list, inline rename, add button; header names the household** | The member list belongs next to the household identity, not scattered across period pages — so the Add member button moved from the period header into the home household panel, names edit inline on click, the panel leads with a large household name, and the page header reads "Expense periods for {household}" |
+| 24 | **The theme toggle is an icon beside "Create expense period"** | A text "Light/Dark" button under the panel wasted space and attention; a Sun/Moon icon button next to the primary header action is reachable without scrolling and reads without words |
 
 ---
 

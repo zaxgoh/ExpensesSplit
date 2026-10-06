@@ -17,6 +17,7 @@ import { CreatePeriodDialog } from "@/components/periods/lazyCreatePeriodDialog"
 import { ConfirmDeleteDialog } from "@/components/periods/ConfirmDeleteDialog";
 import { StatusBadge } from "@/components/periods/StatusBadge";
 import { StatusFilter } from "@/components/periods/StatusFilter";
+import { ThemeToggle } from "@/components/layout/ThemeScript";
 import { useHousehold } from "@/components/layout/HouseholdProvider";
 import { formatMoney } from "@/lib/money/minorUnits";
 import type { ExpensePeriod, ISODate, StatusFilter as StatusFilterValue } from "@/types";
@@ -27,7 +28,7 @@ import type { ExpensePeriod, ISODate, StatusFilter as StatusFilterValue } from "
  * state, with the create button still visible in the header.
  */
 export function PeriodTable() {
-  const { repository, ready, periods, reloadPeriods } = useHousehold();
+  const { repository, household, ready, periods, reloadPeriods } = useHousehold();
   const [filter, setFilter] = useState<StatusFilterValue>("all");
   const [descending, setDescending] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -66,12 +67,15 @@ export function PeriodTable() {
     <div className="grid gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Expense periods</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {household ? `Expense periods for ${household.name}` : "Expense periods"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             Each period holds its own expenses and settles independently.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <ThemeToggle />
           <Button onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" aria-hidden />
             Create expense period

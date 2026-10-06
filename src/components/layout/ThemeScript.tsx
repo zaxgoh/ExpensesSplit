@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const STORAGE_KEY = "1stsplit:theme";
@@ -35,14 +36,19 @@ export function ThemeToggle() {
     }
   }
 
+  // Icon only: Sun offers the light theme while dark is active and vice versa.
   return (
     <Button
       variant="outline"
-      size="sm"
+      size="icon"
       onClick={toggle}
       aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
     >
-      {theme === "dark" ? "Light" : "Dark"}
+      {theme === "dark" ? (
+        <Sun className="h-4 w-4" aria-hidden />
+      ) : (
+        <Moon className="h-4 w-4" aria-hidden />
+      )}
     </Button>
   );
 }
