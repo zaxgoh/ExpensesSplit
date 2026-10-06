@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 import { StatusBadge } from "@/components/periods/StatusBadge";
 import { InlinePeriodName } from "@/components/periods/InlinePeriodName";
 import { ConfirmDeleteDialog } from "@/components/periods/ConfirmDeleteDialog";
+import { AddMemberDialog } from "@/components/members/AddMemberDialog";
 import { TransferSummary } from "@/components/settlement/TransferSummary";
 import { useHousehold } from "@/components/layout/HouseholdProvider";
 import { formatMoney } from "@/lib/money/minorUnits";
@@ -41,6 +42,7 @@ export function PeriodView({ periodId }: { periodId: string }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
+  const [memberDialogOpen, setMemberDialogOpen] = useState(false);
   const [sort, setSort] = useState<ExpenseSort>({ key: "date", direction: "asc" });
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [deletingPeriod, setDeletingPeriod] = useState(false);
@@ -200,15 +202,21 @@ export function PeriodView({ periodId }: { periodId: string }) {
               Reopen period
             </Button>
           ) : (
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setFormOpen(true);
-              }}
-            >
-              <Plus className="mr-2 h-4 w-4" aria-hidden />
-              Add expense
-            </Button>
+            <>
+              <Button
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="mr-2 h-4 w-4" aria-hidden />
+                Add expense
+              </Button>
+              <Button variant="outline" onClick={() => setMemberDialogOpen(true)}>
+                <UserPlus className="mr-2 h-4 w-4" aria-hidden />
+                Add member
+              </Button>
+            </>
           )}
           <Button
             variant="outline"
@@ -314,6 +322,8 @@ export function PeriodView({ periodId }: { periodId: string }) {
       )}
 
       {totals ? <InvariantProbe totals={totals} /> : null}
+
+      <AddMemberDialog open={memberDialogOpen} onOpenChange={setMemberDialogOpen} />
 
       <ConfirmDeleteDialog
         open={deletingExpense !== null}

@@ -501,7 +501,11 @@ name, date range, total, `StatusBadge`) above a **table of expenses** with these
   shuffles equal rows between renders.
 - An empty period shows a designed empty state, not a blank table.
 
-An **"Add expense"** button in the page header opens the form (F5). Clicking an expense's name opens
+An **"Add expense"** button in the page header opens the form (F5). An **"Add member"**
+button beside it opens a dialog with a single member-name input (live avatar preview continuing
+the setup round-robin); it rejects an empty name and a name another member — archived or not —
+already uses, case-insensitively. It appears only while the period is `in progress`: a settled
+period is read-only and gains no members. Clicking an expense's name opens
 the same form pre-filled for editing. Deleting an expense is **permanent and always confirmed** — see
 F9; there is no undo.
 
@@ -573,14 +577,15 @@ A **Settlement card** on the period page, headed "Household account — <period 
 - On a settled period the card is read-only and shows a **Reopen period** button, which asks for
   confirmation and sets `status: "in_progress"` and `settledAt: null`. Reopening does not delete
   anything and does not alter any existing expense or transfer figure.
-- Each member row shows the **exact** figure in cents beneath the rounded transfer, so the arithmetic
-  is inspectable without a separate drill-in popover.
+- Each member row shows the rounded whole-dollar transfer only — no exact-cents
+  line beneath it. The rounded figures are the transfer; the exact cents stay
+  in the data, not on the row.
 
 **The settled period page.** Once a period is settled, its page stops using the
 Expenses/Settlement tabs and renders a single column, top to bottom:
 
 1. **The settled amounts section** — the settlement card above (funding line, one row per
-   member with a non-zero transfer, exact cents beneath each rounded figure), read-only,
+   member with a non-zero transfer, rounded whole-dollar figures only), read-only,
    with its **Copy all** button.
 2. **The expense table** under an "Expenses" heading — the same F4 table, read-only, its
    sortable headers still working. A settled period with zero expenses shows the empty
@@ -727,6 +732,10 @@ action rather than a selected state, and its only visual difference is a fill.
     mobile): household name input plus ≥2 member inputs with live avatar preview, and a
     **Continue** action that creates the household and its members. Rendered by the home page only
     while no household document exists; no button or route opens it otherwise.
+12. **AddMemberDialog** — post-setup member creation from an in-progress period page: one name
+    input with live avatar preview, duplicate rejection, and an **Add** action that creates the
+    member and refreshes the household's member list. Past expenses are untouched; the new
+    member joins every future split with a zero balance so far.
 
 ### Guarding the shadcn primitives
 
@@ -1052,7 +1061,7 @@ keeps local data off production.
 | Date picker | Vitest + Testing Library | the calendar exposes two caption dropdowns (month, year); the year list spans 2020–2030; out-of-range days are disabled; an empty picker opens on the current month; choosing a day emits an ISO date |
 | Firestore rules | `@firebase/rules-unit-testing` | unauthenticated read denied; non-member read/write denied; bad `amountMinor`/`name`/`participants` rejected; `isPrePaid` true with null `paidBy` (and the reverse) rejected; expense `date` outside the period rejected; **expense write to a `settled` period rejected** and the same write to an `in_progress` period allowed; `createdAt` mutation rejected; cross-household write denied |
 | UI guard | Vitest | the shadcn primitives still carry the 44px size classes, and no animation library is present (§6) |
-| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member ("Yes — Alex") and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page** |
+| Components | Vitest + Testing Library (jsdom) | period table columns, default sort, status filter and empty state; create-period dialog; **period delete with and without confirming, and the cascade to expenses**; **inline rename, including rejecting a duplicate name**; **expense sorting on each of the three columns in both directions**; **expense delete behind a confirmation**; the `Prepaid by a member` checkbox hiding the whole split section; **a pre-paid save persisting as an equal split with a negative balance for the fronting member**; all three split modes; the live preview blocking an unbalanced save; settlement card; settle and reopen; **the Prepaid column naming the fronting member ("Yes — Alex") and "Removed member" for a since-removed fronting member**; **the settled period page: settled amounts above the expense table with no tabs, the copy-link button copying the page URL, and no copy-link button on the in-progress page**; **adding a member from an in-progress period page, rejecting a duplicate name, and no add-member button on a settled page** |
 | E2E | Playwright (deferred) | first-run setup dialog → create period → add a pre-paid and an account-paid expense → see transfer amounts → settle → reopen → reload → data still there |
 | Accessibility | axe-core (deferred with Playwright) | zero serious/critical on `/` (including the first-run setup dialog) and `/period/[id]` |
 
@@ -1111,6 +1120,8 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
       without relying on colour alone
 - [ ] Expenses cannot be added, edited or deleted in a settled period, and a reopened period accepts
       them again
+- [ ] A member can be added from an in-progress period page (no add control on settled pages);
+      duplicate names are rejected and past expenses are untouched
 - [ ] The Prepaid column names the member who fronted a pre-paid expense ("Yes — Alex"),
       and shows "Removed member" when that member has since been removed
 
@@ -1125,7 +1136,7 @@ primary gate. Add the E2E and accessibility suites once the backend lands.
 - [ ] Owed amounts are rounded **up** to whole dollars; reimbursements are rounded **down** in
       magnitude with the sign reapplied; `$0` stays `$0` and never becomes `-0`; whole-dollar amounts
       render without decimals
-- [ ] The rounded figures are presented as-is, and the exact cents are shown alongside each member
+- [ ] The rounded figures are presented as-is, with no exact-cents line beneath them
 - [ ] The funding line is labelled as the account's own money, not a member's debt
 - [ ] No member-to-member payment is shown anywhere
 - [ ] Settling a period locks it; reopening unlocks it and changes nothing else
@@ -1194,6 +1205,8 @@ around it.
 | 18 | **The Prepaid column names the fronting member** | The money model has exactly one fronting member per expense (`paidBy`), so the column shows "Yes — Alex" rather than a bare "Yes"; a since-removed fronting member reads as "Removed member" (§4) |
 | 19 | **Settled period pages restructure; in-progress pages keep tabs** | A settled period is a statement to read and share: settled amounts at the top, the expense table below, no tabs. In-progress periods keep the Expenses/Settlement tabs where the add form and the settle action live |
 | 20 | **Copy link copies the page URL, on settled pages only** | The page URL is the cheapest thing that "brings a member directly to this settled expense period page". Phase 1 (localStorage) links open on the same device; cross-device arrival is the deferred join-link feature (§7), which needs no change here |
+| 21 | **Members can be added after setup, from an in-progress period page** | Setup runs once, so a household that ends up short of members had no in-app recovery. The dialog rejects duplicates per household (§3) and touches no existing expense; settled pages show no add control |
+| 22 | **No exact-cents line under settlement transfers** | The rounded whole-dollar figure is the transfer — the extra "exact $X · rounded up/down" line added noise without changing what anyone pays |
 
 ---
 

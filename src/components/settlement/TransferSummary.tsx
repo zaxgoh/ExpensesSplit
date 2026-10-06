@@ -106,9 +106,6 @@ export function TransferSummary({
                       ? `transfer ${formatMoneyWhole(transfer.toAccountSettled)} to the account`
                       : `reimbursed ${formatMoneyWhole(-transfer.toAccountSettled)} by the account`}
                   </span>
-                  <span className="block text-xs text-muted-foreground tnum">
-                    exact {formatMoney(transfer.toAccountExact)} · {transfer.toAccountExact > 0 ? "rounded up" : "rounded down"}
-                  </span>
                 </span>
               </li>
             );

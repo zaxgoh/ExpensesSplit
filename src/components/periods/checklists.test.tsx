@@ -47,6 +47,10 @@ function mount(ui: React.ReactElement) {
  * real form renders before asserting on it.
  */
 async function openAddExpenseForm(user: ReturnType<typeof userEvent.setup>) {
+  // Warm the code-split module first: on a cold start the transform of the
+  // form's dependency graph (calendar, Radix primitives) outlasts the
+  // findByLabelText retry window below.
+  await import("@/components/expenses/AddExpenseForm");
   await user.click(screen.getByRole("button", { name: /^add expense$/i }));
   await screen.findByLabelText(/^name$/i);
 }
@@ -969,6 +973,71 @@ describe("checklist: expenses", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it("adds a member from the period page and offers them in the expense form", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({ name: "September" });
+
+    const user = userEvent.setup();
+    mount(<PeriodView periodId={period.id} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^add member$/i }),
+      ).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^add member$/i }));
+    await user.type(await screen.findByLabelText(/member name/i), "Riley");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    await waitFor(async () =>
+      expect(await localRepository.listMembers()).toHaveLength(3),
+    );
+    // The dialog closes and the new member is offered in the split.
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await openAddExpenseForm(user);
+    expect(screen.getByRole("checkbox", { name: /riley/i })).toBeInTheDocument();
+  });
+
+  it("rejects a duplicate member name when adding", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({ name: "September" });
+
+    const user = userEvent.setup();
+    mount(<PeriodView periodId={period.id} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /^add member$/i }),
+      ).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: /^add member$/i }));
+    await user.type(await screen.findByLabelText(/member name/i), "alex");
+    await user.click(screen.getByRole("button", { name: /^add$/i }));
+
+    expect(await screen.findByText(/already added/i)).toBeInTheDocument();
+    expect(await localRepository.listMembers()).toHaveLength(2);
+  });
+
+  it("shows no add-member button on a settled period", async () => {
+    await seedHousehold(["Alex", "Sam"]);
+    const period = await createPeriod({ name: "September" });
+    await localRepository.updatePeriod(period.id, {
+      status: "settled",
+      settledAt: Date.now(),
+    });
+
+    mount(<PeriodView periodId={period.id} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("No expenses in this period")).toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: /^add member$/i }),
+    ).not.toBeInTheDocument();
   });
 });
 

@@ -20,6 +20,22 @@ rules_version = '2';
  *    existing member document" cannot be checked one document at a time. It is
  *    checked against the household's append-only `memberIds` array instead,
  *    which the repository keeps in step with the members collection.
+ *
+ * Two more constructs look valid but deny every write that evaluates them, so
+ * they are deliberately not used (each verified empirically against the
+ * production database):
+ *
+ *  - A `filter`/`hasAny` lambda. The compiler flags `filter` as an invalid
+ *    function name. The no-removals check on `memberIds` is therefore written
+ *    with `hasOnly`, which expresses the same intent with no lambda.
+ *
+ *  - `List.sum()`. There is no summing a map's values in rules, so the
+ *    "shares sum to the expense total" check lives outside rules entirely
+ *    (see `sharesAreSound`): the split engine asserts it, the expense form
+ *    blocks unbalanced saves, and both are unit-tested. Set/map equality is
+ *    likewise written with `hasOnly`/field access rather than `==`, which had
+ *    never been exercised by a passing rule and was replaced defensively in
+ *    the same pass.
  */
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -60,12 +76,21 @@ service cloud.firestore {
       return value in ['equal', 'exact', 'percent'];
     }
 
-    /** sharesMinor's keys are exactly `participants`, and they sum to the total. */
-    function sharesAreSound(shares, amountMinor, participants) {
+    /**
+     * sharesMinor's keys are exactly `participants`. The sum check lives
+     * outside rules on purpose: `List.sum()` does not exist in the rules
+     * language — any rule evaluating it denies every write (verified: the
+     * expense write passes with this line removed and fails with it
+     * present, everything else identical). The sum is enforced where it can
+     * be: `computeShares` asserts `sum(shares) === amountMinor`, the expense
+     * form blocks unbalanced saves, and both are unit-tested. A forged
+     * client can only corrupt its own household (rules still isolate
+     * households), the same division of labour as the period totals above.
+     */
+    function sharesAreSound(shares, participants) {
       return shares is map
         && shares.keys().hasAll(participants)
-        && participants.hasOnly(shares.keys())
-        && shares.values().sum() == amountMinor;
+        && participants.hasOnly(shares.keys());
     }
 
     // ------------------------------------------------------------- household
@@ -97,21 +122,32 @@ service cloud.firestore {
        * it change would mean the create rule above is the only thing standing
        * between a household and the public. `memberIds` may only grow, one at a
        * time, in the same batch as the member document it registers.
+       *
+       * Set/map equality is written out with `hasOnly`/field access rather
+       * than `==`, and the no-removals check with `hasOnly` rather than a
+       * `filter`/`hasAny` lambda — see the header note on constructs the
+       * rules engine rejects.
        */
       allow update: if isMember(hid)
-        && request.resource.data.memberUids == resource.data.memberUids
+        && request.resource.data.memberUids.hasOnly(resource.data.memberUids)
+        && resource.data.memberUids.hasOnly(request.resource.data.memberUids)
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.schemaVersion == resource.data.schemaVersion
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 1
         && request.resource.data.name.size() <= 60
-        && request.resource.data.settings == resource.data.settings
+        && request.resource.data.settings.keys().hasOnly(['defaultCategoryId'])
+        && resource.data.settings.keys().hasOnly(['defaultCategoryId'])
+        && request.resource.data.settings.defaultCategoryId
+            == resource.data.settings.defaultCategoryId
         && request.resource.data.memberIds is list
         && resource.data.memberIds is list
         && request.resource.data.memberIds.size() <= resource.data.memberIds.size() + 1
-        && resource.data.memberIds.filter(
-             x, !request.resource.data.memberIds.hasAny([x])
-           ).size() == 0;
+        // No removals: every previously registered id is still present. Written
+        // with `hasOnly` rather than a `filter`/`hasAny` lambda — the rules
+        // compiler flags `filter` as an invalid function name, and any update
+        // evaluating that lambda is denied.
+        && resource.data.memberIds.hasOnly(request.resource.data.memberIds);
 
       allow delete: if isMember(hid);
 
@@ -238,7 +274,6 @@ service cloud.firestore {
               && request.resource.data.excluded is bool
               && sharesAreSound(
                    request.resource.data.sharesMinor,
-                   request.resource.data.amountMinor,
                    request.resource.data.participants
                  );
           }
